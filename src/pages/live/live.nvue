@@ -1,0 +1,180 @@
+<template>
+  <view class="page">
+    <!-- 上：自定义导航栏，固定高度，正常占位 -->
+    <view
+      class="nav-bar"
+      :style="{ height: navBarHeight + 'px', paddingTop: statusBarHeight + 'px' }"
+    >
+      <view class="nav-back" @click="goBack">
+        <text class="nav-back-icon">‹</text>
+      </view>
+      <text class="nav-title">直播播放</text>
+    </view>
+
+    <!-- 中：nvue 下的 web-view 支持用 flex/宽高样式控制大小，不会像 vue 页面那样强制铺满全屏 -->
+    <web-view
+      v-if="webviewSrc"
+      ref="liveWebview"
+      class="webview"
+      :src="webviewSrc"
+      @onPostMessage="onWebviewMessage"
+    ></web-view>
+    <view v-else class="fallback">
+      <text class="fallback-text">当前平台暂不支持 web-view 直播播放，请在 App/Android 端运行</text>
+    </view>
+
+    <!-- 下：播放控制栏，固定高度，正常占位 -->
+    <view class="control-bar">
+      <view class="play-btn" @click="togglePlay">
+        <text class="play-btn-text">{{ isPlaying ? '暂停' : '播放' }}</text>
+      </view>
+      <view class="fullscreen-btn" @click="enterFullscreen">
+        <text class="fullscreen-btn-text">全屏</text>
+      </view>
+    </view>
+  </view>
+</template>
+
+<script>
+// 直播流地址：拿到具体 FLV 地址后，只需要改这里
+const FLV_URL = 'https://srs.unsj.edu.ar/live/xama/xama.flv'
+
+const NAV_BAR_CONTENT_HEIGHT = 44 // 导航栏内容高度（不含状态栏）
+
+export default {
+  data() {
+    return {
+      webviewSrc: '',
+      statusBarHeight: 0,
+      isPlaying: false,
+    }
+  },
+  computed: {
+    navBarHeight() {
+      return this.statusBarHeight + NAV_BAR_CONTENT_HEIGHT
+    },
+  },
+  onLoad() {
+    const sysInfo = uni.getSystemInfoSync()
+    this.statusBarHeight = sysInfo.statusBarHeight || 0
+    this.webviewSrc =
+      '/hybrid/html/flv-player.html?url=' + encodeURIComponent(FLV_URL)
+  },
+  methods: {
+    goBack() {
+      uni.navigateBack({
+        delta: 1,
+      })
+    },
+    // 通过 ref 拿到 web-view 实例，用 evalJS 向内部页面派发指令
+    // flv-player.html 里监听 window 上的自定义事件 uni-app-command 来响应
+    evalInWebview(action) {
+      if (this.$refs.liveWebview) {
+        this.$refs.liveWebview.evalJS(
+          "window.dispatchEvent(new CustomEvent('uni-app-command', { detail: { action: '" +
+            action +
+            "' } }))"
+        )
+      }
+    },
+    togglePlay() {
+      if (this.isPlaying) {
+        this.evalInWebview('pause')
+        this.isPlaying = false
+      } else {
+        this.evalInWebview('play')
+        this.isPlaying = true
+      }
+    },
+    enterFullscreen() {
+      this.evalInWebview('fullscreen')
+    },
+    // nvue 下 @onPostMessage 直接收到 data 对象，实际消息内容在 data.detail 里
+    onWebviewMessage(data) {
+      const detail = data && data.detail
+      const msg = Array.isArray(detail) ? detail[0] : detail
+      console.log('[web-view message]', msg)
+      if (!msg) return
+      if (msg.type === 'play_success') {
+        this.isPlaying = true
+      } else if (msg.type === 'paused' || msg.type === 'play_rejected') {
+        this.isPlaying = false
+      }
+    },
+  },
+}
+</script>
+
+<style>
+.page {
+  flex: 1;
+  flex-direction: column;
+  background-color: #000000;
+}
+
+.nav-bar {
+  flex-direction: row;
+  align-items: center;
+  background-color: #1a1a1a;
+}
+
+.nav-back {
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-back-icon {
+  color: #ffffff;
+  font-size: 26px;
+  font-weight: bold;
+}
+
+.nav-title {
+  color: #ffffff;
+  font-size: 16px;
+}
+
+.webview {
+  flex: 1;
+}
+
+.fallback {
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-color: #000000;
+}
+
+.fallback-text {
+  color: #8f8f94;
+  text-align: center;
+}
+
+.control-bar {
+  height: 56px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  background-color: #1a1a1a;
+}
+
+.play-btn,
+.fullscreen-btn {
+  padding: 8px 24px;
+  border-radius: 999px;
+  background-color: #333333;
+  align-items: center;
+  justify-content: center;
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
+.play-btn-text,
+.fullscreen-btn-text {
+  color: #ffffff;
+  font-size: 14px;
+}
+</style>
