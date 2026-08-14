@@ -8,7 +8,7 @@
 
     <view class="viewer" :style="viewerStyle">
       <web-view v-if="webviewSrc" ref="liveWebview" class="webview" :src="webviewSrc" :webview-styles="webviewStyles" @onPostMessage="onWebviewMessage"></web-view>
-      <view v-else class="fallback"><text class="fallback-text">当前平台暂不支持直播播放</text></view>
+      <view v-else class="fallback"><text class="fallback-text">当前平台暂不支持 web-view 直播播放，请在 App/Android 端运行</text></view>
 
       <view class="cover" v-if="!isFullscreen && !isPlaying && !isLoading" @click="togglePlay">
         <view class="cover-button"><text class="cover-play">▶</text></view>
