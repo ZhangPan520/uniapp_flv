@@ -1,717 +1,137 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>FLV Live Player (H5 自绘 UI)</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>客厅摄像头</title>
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #000;
-      overflow: hidden;
-      font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
-    }
-    /* 整体容器：视频铺满全屏，requestFullscreen 作用在这个容器上（不是单独对 video），
-       这样进入全屏后自绘的导航栏/控制栏依然存在且可交互，符合哔哩哔哩类 App 的全屏体验 */
-    #app {
-      position: fixed;
-      left: 0;
-      right: 0;
-      top: 0;
-      bottom: 0;
-      background: #000;
-      overflow: hidden;
-    }
-    #video {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      background: #000;
-      object-fit: contain;
-      /* video 本身不接收任何交互，点击热区统一由 #tapLayer 承担，否则浏览器内核会认为
-         video 是"可交互元素"，重新画出它自己的原生播放遮罩（不受 CSS 隐藏规则控制） */
-      pointer-events: none;
-    }
-    /* 隐藏 Chromium/Android WebView 给空的 <video> 元素自动叠加的原生播放遮罩按钮 */
-    video::-webkit-media-controls,
-    video::-webkit-media-controls-enclosure,
-    video::-webkit-media-controls-panel,
-    video::-webkit-media-controls-play-button,
-    video::-webkit-media-controls-start-playback-button,
-    video::-webkit-media-controls-overlay-play-button,
-    video::-webkit-media-controls-overlay-enclosure {
-      display: none !important;
-      -webkit-appearance: none !important;
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-    /* 点击热区：铺满整个视频区域，用来切换控制层显示/隐藏，层级在视频之上、控制层之下 */
-    #tapLayer {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 5;
-      background: transparent;
-    }
-    #tip {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 50%;
-      transform: translateY(-50%);
-      text-align: center;
-      color: #fff;
-      font-size: 14px;
-      padding: 0 20px;
-      display: none;
-      pointer-events: none;
-      z-index: 6;
-    }
-    /* 顶部导航栏：悬浮在视频上方，半透明黑色渐变，哔哩哔哩风格 */
-    #navBar {
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 0;
-      z-index: 10;
-      display: flex;
-      align-items: center;
-      height: 44px;
-      box-sizing: border-box;
-      background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
-      transition: opacity 0.25s ease, transform 0.25s ease;
-    }
-    #backBtn {
-      width: 44px;
-      height: 44px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      font-size: 26px;
-      font-weight: bold;
-    }
-    #navTitle {
-      color: #fff;
-      font-size: 15px;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-    }
-    /* 底部控制栏：悬浮在视频下方，半透明黑色渐变 */
-    #controlBar {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: 10;
-      height: 44px;
-      box-sizing: border-box;
-      padding: 0 8px;
-      display: flex;
-      align-items: center;
-      background: linear-gradient(to top, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
-      transition: opacity 0.25s ease, transform 0.25s ease;
-    }
-    .ctrl-icon-btn {
-      width: 40px;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      flex-shrink: 0;
-    }
-    .ctrl-icon-btn svg {
-      width: 20px;
-      height: 20px;
-      fill: #fff;
-    }
-    #liveBadge {
-      display: flex;
-      align-items: center;
-      margin-left: 4px;
-      color: #fff;
-      font-size: 12px;
-    }
-    #liveDot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #ff4d4f;
-      margin-right: 4px;
-    }
-    .ctrl-spacer {
-      flex: 1;
-    }
-    /* 控制层整体：导航栏和控制栏统一被这个类控制显示/隐藏 */
-    .controls-hidden #navBar {
-      opacity: 0;
-      transform: translateY(-8px);
-      pointer-events: none;
-    }
-    .controls-hidden #controlBar {
-      opacity: 0;
-      transform: translateY(8px);
-      pointer-events: none;
-    }
-    /* 播放前的封面态：深色渐变背景 + 居中播放按钮，直播场景没有素材可以提前截帧
-       （还没开始拉流，没有画面数据），用精心设计的空状态代替浏览器默认的丑陋图标 */
-    #cover {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 8;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: radial-gradient(circle at 50% 40%, #262631 0%, #14141a 60%, #0b0b0d 100%);
-    }
-    #coverPlayBtn {
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.14);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 14px;
-    }
-    #coverPlayBtn svg {
-      width: 26px;
-      height: 26px;
-      fill: #ffffff;
-      margin-left: 2px;
-    }
-    #coverText {
-      color: rgba(255, 255, 255, 0.75);
-      font-size: 13px;
-      letter-spacing: 0.5px;
-    }
-    /* Loading 层：点击播放后、拿到第一帧画面前显示，覆盖在封面之上，
-       直播拉流有网络延迟，这段时间不能是空白或者卡在播放按钮不动 */
-    #loading {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 9;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      background: rgba(11, 11, 13, 0.65);
-    }
-    #loadingSpinner {
-      width: 34px;
-      height: 34px;
-      border: 3px solid rgba(255, 255, 255, 0.25);
-      border-top-color: #ffffff;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-bottom: 12px;
-    }
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-    #loadingText {
-      color: rgba(255, 255, 255, 0.75);
-      font-size: 12px;
-    }
+    :root { --ink:#161818; --muted:#737977; --line:#e5e8e6; --surface:#f5f7f5; --paper:#fff; --stage:#111413; --live:#e54936; --online:#28a06a; --status:0px; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body { width:100%; height:100%; margin:0; overflow:hidden; background:var(--surface); color:var(--ink); font-family:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif; letter-spacing:0; }
+    button { padding:0; border:0; color:inherit; background:none; font:inherit; }
+    #app { position:fixed; inset:0; display:flex; flex-direction:column; background:var(--surface); }
+    #header { flex:0 0 calc(64px + var(--status)); padding:var(--status) 10px 0; display:grid; grid-template-columns:48px 1fr 48px; align-items:center; color:#fff; background:var(--stage); }
+    .icon-button { width:44px; height:44px; display:grid; place-items:center; border-radius:50%; }
+    .icon-button:active,.action:active,.step-button:active { transform:scale(.94); }
+    .icon { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+    .title { min-width:0; text-align:center; }
+    .title strong,.title span { display:block; }
+    .title strong { font-size:16px; line-height:21px; font-weight:700; }
+    .title span { overflow:hidden; color:rgba(255,255,255,.58); font-size:11px; line-height:16px; text-overflow:ellipsis; white-space:nowrap; }
+    #viewer { position:relative; flex:0 0 min(72.82vw,284px); min-height:210px; overflow:hidden; background:#131615; }
+    #video { width:100%; height:100%; display:block; object-fit:cover; background:#111413; pointer-events:none; }
+    video::-webkit-media-controls,video::-webkit-media-controls-enclosure,video::-webkit-media-controls-panel,video::-webkit-media-controls-play-button,video::-webkit-media-controls-start-playback-button,video::-webkit-media-controls-overlay-play-button { display:none!important; opacity:0!important; pointer-events:none!important; }
+    #placeholder { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; filter:saturate(.72) contrast(1.06) brightness(.58); transform:scale(1.03); }
+    #shade { position:absolute; inset:0; background:linear-gradient(to bottom,rgba(9,12,11,.22),transparent 30%,transparent 60%,rgba(9,12,11,.62)); pointer-events:none; }
+    #tapLayer { position:absolute; inset:0; z-index:2; }
+    .video-top,.video-bottom { position:absolute; left:14px; right:14px; z-index:5; display:flex; align-items:center; justify-content:space-between; color:#fff; transition:opacity .18s ease,transform .2s ease; }
+    .video-top { top:14px; }.video-bottom { bottom:13px; }
+    .pill { min-height:26px; padding:0 8px; display:inline-flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.13); border-radius:5px; background:rgba(12,15,14,.6); backdrop-filter:blur(8px); color:#fff; font-size:11px; font-weight:700; }
+    .live-dot { width:6px; height:6px; border-radius:50%; background:#ff5b47; box-shadow:0 0 0 3px rgba(229,73,54,.2); }
+    #timestamp { font:600 11px/1.4 "SFMono-Regular",Consolas,monospace; text-shadow:0 1px 5px #000; }
+    .video-actions { display:flex; gap:4px; }
+    .video-actions .icon-button { width:38px; height:38px; background:rgba(12,15,14,.54); backdrop-filter:blur(8px); }
+    #cover,#loading { position:absolute; inset:0; z-index:4; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#fff; }
+    #coverPlay { width:62px; height:62px; margin-bottom:12px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.22); border-radius:50%; background:rgba(12,15,14,.62); backdrop-filter:blur(8px); }
+    #coverPlay .icon { width:26px; height:26px; margin-left:3px; fill:#fff; stroke:none; }
+    #coverText,#loadingText { color:rgba(255,255,255,.78); font-size:12px; }
+    #loading { display:none; background:rgba(11,11,13,.66); }
+    #spinner { width:32px; height:32px; margin-bottom:12px; border:3px solid rgba(255,255,255,.24); border-top-color:#fff; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    #tip { position:absolute; left:24px; right:24px; top:50%; z-index:8; display:none; color:#fff; font-size:13px; text-align:center; transform:translateY(-50%); }
+    #content { flex:1; min-height:0; overflow:auto; padding:14px 14px calc(26px + env(safe-area-inset-bottom)); background:var(--surface); scrollbar-width:none; }
+    #content::-webkit-scrollbar { display:none; }
+    .status-row { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:13px; }
+    .device-meta strong,.device-meta span { display:block; }.device-meta strong { font-size:15px; line-height:22px; }.device-meta span { color:var(--muted); font-size:11px; line-height:17px; }
+    .online { flex:none; margin-top:4px; display:inline-flex; align-items:center; gap:6px; color:#247b55; font-size:11px; font-weight:700; }.online::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--online); }
+    .timeline { height:45px; margin-bottom:16px; padding:0 12px; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; border:1px solid var(--line); border-radius:6px; background:var(--paper); color:var(--muted); font-size:10px; }
+    .track { position:relative; height:2px; background:#dfe3e0; }.track::before { content:""; position:absolute; inset:0 28% 0 0; background:var(--ink); }.track::after { content:""; position:absolute; left:72%; top:50%; width:8px; height:8px; border:2px solid #fff; border-radius:50%; background:var(--ink); box-shadow:0 0 0 1px var(--ink); transform:translate(-50%,-50%); }
+    .section-label { margin:0 0 9px; color:var(--muted); font-size:11px; line-height:16px; font-weight:700; }
+    .quick-actions { margin-bottom:17px; display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+    .action { min-width:0; height:72px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; border:1px solid var(--line); border-radius:6px; background:var(--paper); color:var(--ink); font-size:11px; font-weight:600; transition:transform .12s ease,background .14s ease; }.action .icon { width:20px; height:20px; }
+    .ptz { min-height:138px; padding:12px; display:grid; grid-template-columns:142px 1fr; align-items:center; gap:16px; border:1px solid var(--line); border-radius:6px; background:var(--paper); }
+    .dpad { width:122px; height:108px; justify-self:center; display:grid; grid-template:repeat(3,36px)/repeat(3,36px); place-content:center; }
+    .dpad button { display:grid; place-items:center; background:#f0f2f0; color:#3f4542; font-size:16px; }.dpad button:active { background:#dde3df; }.dpad .up { grid-column:2; border-radius:5px 5px 0 0; }.dpad .left { grid-row:2; grid-column:1; border-radius:5px 0 0 5px; }.dpad .center { grid-row:2; grid-column:2; border-radius:50%; background:var(--ink); color:#fff; transform:scale(.72); }.dpad .right { grid-row:2; grid-column:3; border-radius:0 5px 5px 0; }.dpad .down { grid-row:3; grid-column:2; border-radius:0 0 5px 5px; }
+    .zoom strong { display:block; margin-bottom:5px; font-size:13px; }.zoom p { margin:0 0 14px; color:var(--muted); font-size:10px; line-height:16px; }.stepper { height:38px; display:grid; grid-template-columns:38px 1fr 38px; overflow:hidden; border:1px solid var(--line); border-radius:5px; }.stepper span { display:grid; place-items:center; border-inline:1px solid var(--line); font-size:11px; font-weight:700; }.step-button { background:#f6f7f6; font-size:18px; }
+    #toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); z-index:30; max-width:calc(100% - 40px); padding:10px 14px; border-radius:6px; background:rgba(20,23,22,.93); color:#fff; font-size:12px; white-space:nowrap; opacity:0; pointer-events:none; transform:translate(-50%,14px); transition:opacity .16s ease,transform .18s ease; }#toast.show { opacity:1; transform:translate(-50%,0); }
+    .controls-hidden .video-top { opacity:0; transform:translateY(-6px); pointer-events:none; }.controls-hidden .video-bottom { opacity:0; transform:translateY(6px); pointer-events:none; }
+    #app.is-fullscreen #header,#app.is-fullscreen #content { display:none; }#app.is-fullscreen #viewer { flex:1; height:100%; min-height:0; }#app.is-fullscreen #video { object-fit:contain; }#app.is-fullscreen #placeholder { object-fit:contain; }
+    @media (max-height:680px) { #viewer { min-height:190px; flex-basis:240px; } .action { height:64px; } }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition-duration:.01ms!important; animation-duration:.01ms!important; } }
   </style>
 </head>
 <body>
-  <!-- 直播流地址：拿到具体地址后只需要改这一行 -->
+  <main id="app">
+    <header id="header">
+      <button class="icon-button" id="backBtn" aria-label="返回"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
+      <div class="title"><strong>客厅摄像头</strong><span>滨江公寓 · 01号设备</span></div>
+      <button class="icon-button js-tip" data-tip="设备设置将在完整版本中开放" aria-label="更多设置"><svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+    </header>
+    <section id="viewer">
+      <video id="video" playsinline webkit-playsinline></video>
+      <img id="placeholder" src="./monitor-office.jpg" alt="客厅摄像头画面">
+      <div id="shade"></div><div id="tapLayer"></div><div id="tip"></div>
+      <div id="cover"><button id="coverPlay" aria-label="播放直播"><svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button><span id="coverText">点击播放实时画面</span></div>
+      <div id="loading"><div id="spinner"></div><span id="loadingText">正在连接直播...</span></div>
+      <div class="video-top"><span class="pill"><span class="live-dot"></span>实时</span><button class="pill js-tip" data-tip="当前画质：高清 1080P">高清 1080P</button></div>
+      <div class="video-bottom"><span id="timestamp">2026-08-14&nbsp;&nbsp;19:42:18</span><div class="video-actions">
+        <button class="icon-button" id="playBtn" aria-label="播放或暂停"><svg id="playIcon" class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg><svg id="pauseIcon" class="icon" viewBox="0 0 24 24" style="display:none"><path d="M7 5v14M17 5v14"/></svg></button>
+        <button class="icon-button" id="rotateBtn" aria-label="旋转屏幕"><svg class="icon" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 9a7 7 0 0 1 11.3-2.5L20 9M4 15l2.6 2.5A7 7 0 0 0 17.9 15"/></svg></button>
+        <button class="icon-button" id="fullscreenBtn" aria-label="全屏"><svg id="fsEnter" class="icon" viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg><svg id="fsExit" class="icon" viewBox="0 0 24 24" style="display:none"><path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/></svg></button>
+      </div></div>
+    </section>
+    <section id="content">
+      <div class="status-row"><div class="device-meta"><strong>客厅 · 主视角</strong><span>连接稳定 · 延迟 0.8 秒</span></div><span class="online">设备在线</span></div>
+      <div class="timeline"><span>19:30</span><div class="track"></div><span>现在</span></div>
+      <p class="section-label">快捷操作</p>
+      <div class="quick-actions">
+        <button class="action js-tip" data-tip="截图功能等待业务接口接入"><svg class="icon" viewBox="0 0 24 24"><path d="M14.5 4 16 7h4v12H4V7h4l1.5-3z"/><circle cx="12" cy="13" r="3"/></svg><span>截图</span></button>
+        <button class="action js-tip" data-tip="录像功能等待业务接口接入"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg><span>录像</span></button>
+        <button class="action js-tip" data-tip="对讲功能等待业务接口接入"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg><span>对讲</span></button>
+        <button class="action js-tip" data-tip="回放功能等待业务接口接入"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>回放</span></button>
+      </div>
+      <p class="section-label">云台控制</p>
+      <div class="ptz"><div class="dpad"><button class="up js-tip" data-tip="摄像头向上移动">↑</button><button class="left js-tip" data-tip="摄像头向左移动">←</button><button class="center js-tip" data-tip="云台回到中心">●</button><button class="right js-tip" data-tip="摄像头向右移动">→</button><button class="down js-tip" data-tip="摄像头向下移动">↓</button></div><div class="zoom"><strong>画面缩放</strong><p>也可在画面上双指缩放</p><div class="stepper"><button class="step-button js-tip" data-tip="画面已缩小">−</button><span id="zoomValue">1.0×</span><button class="step-button js-tip" data-tip="画面已放大">+</button></div></div></div>
+    </section>
+    <div id="toast" role="status"></div>
+  </main>
+  <script src="./uni.webview.1.5.8.js"></script><script src="./flv.min.js"></script>
   <script>
-    window.FLV_URL = 'https://srs.unsj.edu.ar/live/xama/xama.flv';
-  </script>
-
-  <div id="app">
-    <video id="video" playsinline webkit-playsinline></video>
-    <div id="tapLayer"></div>
-    <div id="tip"></div>
-
-    <!-- 封面态：播放前显示，点击后淡出并开始拉流 -->
-    <div id="cover">
-      <div id="coverPlayBtn">
-        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-      </div>
-      <div id="coverText">点击播放直播</div>
-    </div>
-
-    <!-- Loading 态：点击播放后、拿到首帧画面前显示 -->
-    <div id="loading">
-      <div id="loadingSpinner"></div>
-      <div id="loadingText">正在连接直播...</div>
-    </div>
-
-    <div id="navBar">
-      <div id="backBtn" class="ctrl-icon-btn">
-        <svg viewBox="0 0 24 24"><path d="M15.5 4.5L8 12l7.5 7.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </div>
-      <div id="navTitle">直播播放（方案1：H5自绘UI）</div>
-    </div>
-
-    <div id="controlBar">
-      <div id="playBtn" class="ctrl-icon-btn">
-        <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none;"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
-      </div>
-      <div id="liveBadge"><span id="liveDot"></span>直播中</div>
-      <div class="ctrl-spacer"></div>
-      <!-- 旋转屏幕按钮：独立于全屏按钮，用来主动切换横竖屏方向，不依赖手机自身的重力感应旋转开关 -->
-      <div id="rotateBtn" class="ctrl-icon-btn">
-        <svg viewBox="0 0 24 24"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.28 0 12 0l-.66.03 3.81 3.81 1.33-1.32zM10.23 1.75c-.2-.2-.51-.2-.71 0L4.11 7.36c-.2.2-.2.51 0 .71l5.41 5.61c.2.2.51.2.71 0l5.41-5.61c.2-.2.2-.51 0-.71l-5.41-5.61zM1.05 11H2.6c.35-3.77 2.72-6.94 5.97-8.48L7.24 1.2 1.05 11zm0 2c.36 6.16 5.52 11 11.79 11 .22 0 .44-.01.66-.03l-3.81-3.81-1.32 1.33c-3.27-1.54-5.63-4.7-5.98-8.49H1.05z"/></svg>
-      </div>
-      <div id="fullscreenBtn" class="ctrl-icon-btn">
-        <svg id="fsEnterIcon" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-        <svg id="fsExitIcon" viewBox="0 0 24 24" style="display:none;"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
-      </div>
-    </div>
-  </div>
-
-  <!-- 官方 uni-app webview 桥接 SDK：提供 uni.webView.navigateBack() 等方法，
-       可以直接调用返回，不依赖 @message 那种"仅在特定时机触发"的被动通信方式 -->
-  <script src="./uni.webview.1.5.8.js"></script>
-  <script src="./flv.min.js"></script>
-  <script>
-    (function () {
-      var appEl = document.getElementById('app');
-      var videoEl = document.getElementById('video');
-      var tipEl = document.getElementById('tip');
-      var tapLayerEl = document.getElementById('tapLayer');
-      var coverEl = document.getElementById('cover');
-      var loadingEl = document.getElementById('loading');
-      var backBtnEl = document.getElementById('backBtn');
-      var playBtnEl = document.getElementById('playBtn');
-      var playIconEl = document.getElementById('playIcon');
-      var pauseIconEl = document.getElementById('pauseIcon');
-      var rotateBtnEl = document.getElementById('rotateBtn');
-      var fullscreenBtnEl = document.getElementById('fullscreenBtn');
-      var fsEnterIconEl = document.getElementById('fsEnterIcon');
-      var fsExitIconEl = document.getElementById('fsExitIcon');
-      var navBarEl = document.getElementById('navBar');
-
-      var flvUrl = window.FLV_URL;
-      var player = null;
-      var retryTimer = null;
-      var retryCount = 0;
-      var MAX_RETRY = 5;
-      var started = false; // 是否已经开始过播放，控制是否允许自动重试
-      var isPlaying = false;
-      var isFullscreen = false;
-      var isLandscape = false;
-      var hideControlsTimer = null;
-      var controlsVisible = true;
-
-      function showTip(text) {
-        tipEl.textContent = text;
-        tipEl.style.display = text ? 'block' : 'none';
-      }
-
-      function hideCover() {
-        coverEl.style.display = 'none';
-      }
-
-      function showCover() {
-        coverEl.style.display = 'flex';
-        hideLoading();
-      }
-
-      function showLoading() {
-        loadingEl.style.display = 'flex';
-      }
-
-      function hideLoading() {
-        loadingEl.style.display = 'none';
-      }
-
-      function notifyApp(type, detail) {
-        try {
-          if (window.uni && typeof window.uni.postMessage === 'function') {
-            window.uni.postMessage({ data: { type: type, detail: detail } });
-          }
-        } catch (e) {
-          // 忽略桥不存在的情况
-        }
-      }
-
-      // ---- 控制层显示/隐藏：模拟哔哩哔哩的交互 ----
-      // 播放中几秒无操作自动隐藏；暂停时常驻显示；点击视频区域切换显示状态
-      function showControls() {
-        controlsVisible = true;
-        appEl.classList.remove('controls-hidden');
-        scheduleAutoHide();
-      }
-
-      function hideControls() {
-        controlsVisible = false;
-        appEl.classList.add('controls-hidden');
-        clearAutoHide();
-      }
-
-      function toggleControls() {
-        if (controlsVisible) {
-          hideControls();
-        } else {
-          showControls();
-        }
-      }
-
-      function clearAutoHide() {
-        if (hideControlsTimer) {
-          clearTimeout(hideControlsTimer);
-          hideControlsTimer = null;
-        }
-      }
-
-      function scheduleAutoHide() {
-        clearAutoHide();
-        // 只有播放中才自动隐藏，暂停/未播放时保持常驻，方便用户随时点击播放
-        if (!isPlaying) return;
-        hideControlsTimer = setTimeout(function () {
-          hideControls();
-        }, 3000);
-      }
-
-      function setPlayIcon() {
-        playIconEl.style.display = isPlaying ? 'none' : '';
-        pauseIconEl.style.display = isPlaying ? '' : 'none';
-      }
-
-      function setFullscreenIcon() {
-        fsEnterIconEl.style.display = isFullscreen ? 'none' : '';
-        fsExitIconEl.style.display = isFullscreen ? '' : 'none';
-      }
-
-      function destroyPlayer() {
-        if (player) {
-          try {
-            player.pause();
-            player.unload();
-            player.detachMediaElement();
-            player.destroy();
-          } catch (e) {
-            // ignore
-          }
-          player = null;
-        }
-      }
-
-      function createPlayer() {
-        if (!window.flvjs || !window.flvjs.isSupported()) {
-          showTip('当前浏览器内核不支持 flv.js 播放（需要 MSE 支持）');
-          showCover();
-          notifyApp('unsupported');
-          return;
-        }
-        if (!flvUrl || flvUrl.indexOf('your-flv-stream-url') !== -1) {
-          showTip('请先设置正确的直播流地址（FLV_URL）');
-          showCover();
-          notifyApp('play_rejected', 'invalid url');
-          return;
-        }
-
-        destroyPlayer();
-        showTip('');
-        showLoading();
-
-        player = window.flvjs.createPlayer(
-          {
-            type: 'flv',
-            isLive: true,
-            url: flvUrl,
-          },
-          {
-            enableStashBuffer: false,
-            stashInitialSize: 128,
-            autoCleanupSourceBuffer: true,
-          }
-        );
-
-        player.attachMediaElement(videoEl);
-
-        // 拿到第一帧真实画面数据时才算连接成功，这时才隐藏 loading，
-        // 比 play() 的 Promise resolve 更准确（resolve 只代表调用成功，不代表已经有画面）
-        videoEl.addEventListener('loadeddata', function onFirstFrame() {
-          hideLoading();
-        });
-
-        player.on(window.flvjs.Events.ERROR, function (errType, errDetail) {
-          console.error('[flv.js error]', errType, errDetail);
-          notifyApp('error', { errType: errType, errDetail: errDetail });
-          isPlaying = false;
-          setPlayIcon();
-          showControls();
-          showCover();
-          scheduleRetry();
-        });
-
-        player.on(window.flvjs.Events.LOADING_COMPLETE, function () {
-          notifyApp('loading_complete');
-        });
-
-        player.on(window.flvjs.Events.RECOVERED_EARLY_EOF, function () {
-          notifyApp('recovered_early_eof');
-        });
-
-        player.load();
-        player
-          .play()
-          .then(function () {
-            retryCount = 0;
-            isPlaying = true;
-            setPlayIcon();
-            hideCover();
-            scheduleAutoHide();
-            notifyApp('play_success');
-          })
-          .catch(function (err) {
-            console.warn('[flv.js] play() rejected', err);
-            isPlaying = false;
-            setPlayIcon();
-            showControls();
-            showCover();
-            notifyApp('play_rejected', String(err));
-          });
-      }
-
-      function scheduleRetry() {
-        if (!started) return;
-        if (retryTimer) return;
-        if (retryCount >= MAX_RETRY) {
-          showTip('播放失败，请检查网络或直播源');
-          return;
-        }
-        retryCount += 1;
-        showTip('连接中断，正在重试 (' + retryCount + '/' + MAX_RETRY + ')...');
-        retryTimer = setTimeout(function () {
-          retryTimer = null;
-          createPlayer();
-        }, 2000);
-      }
-
-      function startPlay() {
-        started = true;
-        if (!player) {
-          createPlayer();
-        } else {
-          showLoading();
-          player
-            .play()
-            .then(function () {
-              isPlaying = true;
-              setPlayIcon();
-              hideCover();
-              hideLoading();
-              scheduleAutoHide();
-              notifyApp('play_success');
-            })
-            .catch(function (err) {
-              isPlaying = false;
-              setPlayIcon();
-              showCover();
-              notifyApp('play_rejected', String(err));
-            });
-        }
-      }
-
-      function pausePlay() {
-        if (player) {
-          player.pause();
-        }
-        isPlaying = false;
-        setPlayIcon();
-        showControls();
-        notifyApp('paused');
-      }
-
-      function togglePlay() {
-        if (isPlaying) {
-          pausePlay();
-        } else {
-          startPlay();
-        }
-      }
-
-      // requestFullscreen 作用在整个 #app 容器上（不是单独 video），
-      // 这样全屏后导航栏/控制栏依然叠在视频上方，可以继续点返回、暂停、退出全屏
-      function enterFullscreen() {
-        try {
-          if (appEl.requestFullscreen) {
-            appEl.requestFullscreen();
-          } else if (appEl.webkitRequestFullscreen) {
-            appEl.webkitRequestFullscreen();
-          } else if (videoEl.webkitEnterFullscreen) {
-            // 极端兼容情况下退化为只对 video 全屏（此时自绘按钮会被系统全屏层盖住）
-            videoEl.webkitEnterFullscreen();
-          } else {
-            notifyApp('fullscreen_unsupported');
-          }
-        } catch (e) {
-          console.warn('[flv.js] fullscreen failed', e);
-          notifyApp('fullscreen_failed', String(e));
-        }
-      }
-
-      function exitFullscreen() {
-        try {
-          if (document.exitFullscreen) {
-            document.exitFullscreen();
-          } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-          }
-        } catch (e) {
-          console.warn('[flv.js] exit fullscreen failed', e);
-        }
-      }
-
-      function toggleFullscreen() {
-        if (isFullscreen) {
-          exitFullscreen();
-        } else {
-          enterFullscreen();
-        }
-      }
-
-      function onFullscreenChange() {
-        isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-        setFullscreenIcon();
-        notifyApp(isFullscreen ? 'fullscreen_enter' : 'fullscreen_exit');
-        if (isFullscreen) {
-          // 进入全屏后立即隐藏控制层，追求沉浸式体验，点击屏幕才重新浮现
-          hideControls();
-        } else {
-          // 退出全屏时恢复显示控制层，并解除横屏锁定，避免屏幕方向卡在横屏状态
-          showControls();
-          unlockOrientation();
-        }
-      }
-
-      document.addEventListener('fullscreenchange', onFullscreenChange);
-      document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-
-      // 旋转屏幕按钮：Screen Orientation API 要求先进入全屏才允许锁定方向，
-      // 这是浏览器的标准安全限制（非全屏状态下调用 lock 会被拒绝），因此这里复用现有的全屏能力
-      function lockOrientation(orientation) {
-        try {
-          if (screen.orientation && screen.orientation.lock) {
-            return screen.orientation.lock(orientation);
-          }
-          // 部分旧内核使用不带 Promise 的私有 API
-          if (screen.lockOrientation) {
-            screen.lockOrientation(orientation);
-          }
-        } catch (e) {
-          console.warn('[flv.js] lock orientation failed', e);
-        }
-        return Promise.resolve();
-      }
-
-      function unlockOrientation() {
-        try {
-          if (screen.orientation && screen.orientation.unlock) {
-            screen.orientation.unlock();
-          } else if (screen.unlockOrientation) {
-            screen.unlockOrientation();
-          }
-        } catch (e) {
-          // ignore
-        }
-        isLandscape = false;
-      }
-
-      function toggleRotate() {
-        if (!isLandscape) {
-          // 切横屏前先确保处于全屏状态，否则大概率被浏览器拒绝
-          if (!isFullscreen) {
-            enterFullscreen();
-          }
-          Promise.resolve(lockOrientation('landscape')).then(function () {
-            isLandscape = true;
-            notifyApp('orientation_landscape');
-          });
-        } else {
-          Promise.resolve(lockOrientation('portrait')).then(function () {
-            isLandscape = false;
-            notifyApp('orientation_portrait');
-          });
-        }
-      }
-
-      function goBack() {
-        if (window.uni && window.uni.webView && typeof window.uni.webView.navigateBack === 'function') {
-          window.uni.webView.navigateBack({ delta: 1 });
-        } else {
-          notifyApp('back');
-        }
-      }
-
-      backBtnEl.addEventListener('click', function (e) {
-        e.stopPropagation();
-        goBack();
-      });
-      playBtnEl.addEventListener('click', function (e) {
-        e.stopPropagation();
-        togglePlay();
-      });
-      rotateBtnEl.addEventListener('click', function (e) {
-        e.stopPropagation();
-        toggleRotate();
-      });
-      fullscreenBtnEl.addEventListener('click', function (e) {
-        e.stopPropagation();
-        toggleFullscreen();
-      });
-      // 点击视频区域（非按钮区域）切换控制层显示/隐藏，这是哔哩哔哩类播放器的标准交互
-      tapLayerEl.addEventListener('click', toggleControls);
-      // 点击封面直接开始播放
-      coverEl.addEventListener('click', function (e) {
-        e.stopPropagation();
-        startPlay();
-      });
-
-      function readParamsFromQuery() {
-        try {
-          var params = new URLSearchParams(window.location.search);
-          var u = params.get('url');
-          if (u) {
-            flvUrl = decodeURIComponent(u);
-          }
-          var statusBarHeight = parseFloat(params.get('statusBarHeight') || '0');
-          if (statusBarHeight > 0) {
-            navBarEl.style.paddingTop = statusBarHeight + 'px';
-            navBarEl.style.height = 44 + statusBarHeight + 'px';
-          }
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      readParamsFromQuery();
-      setPlayIcon();
-      setFullscreenIcon();
-      showControls();
-
-      document.addEventListener('visibilitychange', function () {
-        if (!started) return;
-        if (document.hidden) {
-          if (player) player.pause();
-        } else {
-          if (player) player.play().catch(function () {});
-        }
-      });
+    (function(){
+      var app=document.getElementById('app'),video=document.getElementById('video'),placeholder=document.getElementById('placeholder'),cover=document.getElementById('cover'),loading=document.getElementById('loading'),tip=document.getElementById('tip'),toast=document.getElementById('toast');
+      var playIcon=document.getElementById('playIcon'),pauseIcon=document.getElementById('pauseIcon'),fsEnter=document.getElementById('fsEnter'),fsExit=document.getElementById('fsExit');
+      var flvUrl='https://srs.unsj.edu.ar/live/xama/xama.flv',player=null,retryTimer=null,retryCount=0,started=false,isPlaying=false,isFullscreen=false,isLandscape=false,controlsVisible=true,hideTimer=null,toastTimer=null;
+      function notify(type,detail){try{if(window.uni&&window.uni.postMessage)window.uni.postMessage({data:{type:type,detail:detail}})}catch(e){}}
+      function showToast(text){clearTimeout(toastTimer);toast.textContent=text;toast.classList.add('show');toastTimer=setTimeout(function(){toast.classList.remove('show')},1700)}
+      function showTip(text){tip.textContent=text||'';tip.style.display=text?'block':'none'}
+      function showCover(){cover.style.display='flex';placeholder.style.display='block';hideLoading()}
+      function hideCover(){cover.style.display='none';placeholder.style.display='none'}
+      function showLoading(){cover.style.display='none';placeholder.style.display='block';loading.style.display='flex'} function hideLoading(){loading.style.display='none'}
+      function setPlayIcon(){playIcon.style.display=isPlaying?'none':'';pauseIcon.style.display=isPlaying?'':'none'}
+      function clearAutoHide(){if(hideTimer){clearTimeout(hideTimer);hideTimer=null}}
+      function showControls(){controlsVisible=true;app.classList.remove('controls-hidden');scheduleAutoHide()}
+      function hideControls(){controlsVisible=false;app.classList.add('controls-hidden');clearAutoHide()}
+      function scheduleAutoHide(){clearAutoHide();if(isPlaying)hideTimer=setTimeout(hideControls,3000)}
+      function destroyPlayer(){if(!player)return;try{player.pause();player.unload();player.detachMediaElement();player.destroy()}catch(e){}player=null}
+      function createPlayer(){if(!window.flvjs||!window.flvjs.isSupported()){showTip('当前浏览器内核不支持 FLV 播放');showCover();notify('unsupported');return}destroyPlayer();showTip('');showLoading();player=window.flvjs.createPlayer({type:'flv',isLive:true,url:flvUrl},{enableStashBuffer:false,stashInitialSize:128,autoCleanupSourceBuffer:true});player.attachMediaElement(video);video.addEventListener('loadeddata',hideLoading,{once:true});player.on(window.flvjs.Events.ERROR,function(type,detail){notify('error',{errType:type,errDetail:detail});isPlaying=false;setPlayIcon();showControls();showCover();scheduleRetry()});player.load();player.play().then(onPlaySuccess).catch(onPlayError)}
+      function onPlaySuccess(){retryCount=0;isPlaying=true;setPlayIcon();hideCover();hideLoading();scheduleAutoHide();notify('play_success')}
+      function onPlayError(err){isPlaying=false;setPlayIcon();showControls();showCover();notify('play_rejected',String(err))}
+      function scheduleRetry(){if(!started||retryTimer||retryCount>=5)return;retryCount++;showTip('连接中断，正在重试 ('+retryCount+'/5)...');retryTimer=setTimeout(function(){retryTimer=null;createPlayer()},2000)}
+      function startPlay(){started=true;if(!player)createPlayer();else{showLoading();player.play().then(onPlaySuccess).catch(onPlayError)}}
+      function pausePlay(){if(player)player.pause();isPlaying=false;setPlayIcon();showControls();notify('paused')}
+      function togglePlay(){isPlaying?pausePlay():startPlay()}
+      function requestFullscreen(){var fn=app.requestFullscreen||app.webkitRequestFullscreen;if(fn)fn.call(app);else notify('fullscreen_unsupported')}
+      function exitFullscreen(){var fn=document.exitFullscreen||document.webkitExitFullscreen;if(fn)fn.call(document)}
+      function toggleFullscreen(){isFullscreen?exitFullscreen():requestFullscreen()}
+      function onFullscreenChange(){isFullscreen=!!(document.fullscreenElement||document.webkitFullscreenElement);app.classList.toggle('is-fullscreen',isFullscreen);fsEnter.style.display=isFullscreen?'none':'';fsExit.style.display=isFullscreen?'':'none';notify(isFullscreen?'fullscreen_enter':'fullscreen_exit');isFullscreen?hideControls():showControls()}
+      function toggleRotate(){isLandscape=!isLandscape;if(!isFullscreen)requestFullscreen();var orientation=screen.orientation;if(orientation&&orientation.lock)orientation.lock(isLandscape?'landscape':'portrait').catch(function(){});showControls()}
+      document.getElementById('backBtn').addEventListener('click',function(){if(window.uni&&window.uni.webView)window.uni.webView.navigateBack();else notify('back')});
+      document.getElementById('playBtn').addEventListener('click',function(e){e.stopPropagation();togglePlay()});document.getElementById('coverPlay').addEventListener('click',startPlay);document.getElementById('tapLayer').addEventListener('click',function(){controlsVisible?hideControls():showControls()});
+      document.getElementById('rotateBtn').addEventListener('click',function(e){e.stopPropagation();toggleRotate()});document.getElementById('fullscreenBtn').addEventListener('click',function(e){e.stopPropagation();toggleFullscreen()});document.addEventListener('fullscreenchange',onFullscreenChange);document.addEventListener('webkitfullscreenchange',onFullscreenChange);
+      Array.prototype.forEach.call(document.querySelectorAll('.js-tip'),function(el){el.addEventListener('click',function(){showToast(el.getAttribute('data-tip'))})});
+      function readQuery(){try{var params=new URLSearchParams(location.search),url=params.get('url'),status=parseFloat(params.get('statusBarHeight')||'0');if(url)flvUrl=decodeURIComponent(url);if(status>0)document.documentElement.style.setProperty('--status',status+'px')}catch(e){}}readQuery();
+      function updateTime(){var now=new Date(),pad=function(v){return String(v).padStart(2,'0')};document.getElementById('timestamp').textContent=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+'  '+pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds())}updateTime();setInterval(updateTime,1000);
+      document.addEventListener('visibilitychange',function(){if(!started||!player)return;if(document.hidden)player.pause();else player.play().catch(function(){})});
     })();
   </script>
 </body>

@@ -12,7 +12,13 @@
       height: 100%;
       background: #0b0b0d;
       overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: none;
       font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    }
+    body {
+      position: fixed;
+      inset: 0;
     }
     #video {
       width: 100%;
@@ -23,6 +29,17 @@
          必须保留这个属性，否则浏览器内核会认为 video 是"可交互元素"，
          重新画出它自己的原生播放遮罩（一个不受 CSS 隐藏规则控制的巨大圆环+三角形） */
       pointer-events: none;
+      -webkit-user-drag: none;
+      user-select: none;
+    }
+    #placeholder {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: saturate(.72) contrast(1.06) brightness(.58);
+      transform: scale(1.03);
     }
     /* 隐藏 Chromium/Android WebView 给空的 <video> 元素自动叠加的原生播放遮罩按钮 */
     video::-webkit-media-controls,
@@ -60,7 +77,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: radial-gradient(circle at 50% 40%, #262631 0%, #14141a 60%, #0b0b0d 100%);
+      background: rgba(9, 12, 11, .28);
     }
     #coverPlayBtn {
       width: 64px;
@@ -129,6 +146,91 @@
       pointer-events: none;
       z-index: 8;
     }
+    #fullscreenControls {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: none;
+      pointer-events: none;
+    }
+    .external-fullscreen #fullscreenControls {
+      display: block;
+    }
+    .fullscreen-top,
+    .fullscreen-bottom {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #fff;
+      opacity: 1;
+      transition: opacity .18s ease, transform .2s ease;
+      pointer-events: none;
+    }
+    .fullscreen-top { top: max(16px, env(safe-area-inset-top)); }
+    .fullscreen-bottom { bottom: max(16px, env(safe-area-inset-bottom)); }
+    .fullscreen-pill {
+      height: 28px;
+      padding: 0 9px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 5px;
+      background: rgba(12,15,14,.66);
+      backdrop-filter: blur(8px);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      pointer-events: auto;
+    }
+    .fullscreen-live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ff5b47;
+      box-shadow: 0 0 0 3px rgba(229,73,54,.2);
+    }
+    #fullscreenTimestamp {
+      font: 600 11px/1.4 "SFMono-Regular", Consolas, monospace;
+      text-shadow: 0 1px 5px #000;
+    }
+    .fullscreen-actions { display: flex; gap: 6px; pointer-events: auto; }
+    .fullscreen-button {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      color: #fff;
+      background: rgba(12,15,14,.68);
+      backdrop-filter: blur(8px);
+    }
+    .fullscreen-button svg {
+      width: 20px;
+      height: 20px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .fullscreen-button .fill-icon { fill: currentColor; stroke: none; }
+    .fullscreen-controls-hidden .fullscreen-top {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    .fullscreen-controls-hidden .fullscreen-bottom {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    .fullscreen-controls-hidden .fullscreen-button,
+    .fullscreen-controls-hidden .fullscreen-pill {
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -138,6 +240,7 @@
   </script>
 
   <video id="video" playsinline webkit-playsinline></video>
+  <img id="placeholder" src="./monitor-office.jpg" alt="客厅摄像头画面" />
 
   <!-- 封面态：播放前显示，点击后淡出并开始拉流 -->
   <div id="cover">
@@ -156,20 +259,52 @@
   <div id="tapLayer"></div>
   <div id="tip"></div>
 
+  <div id="fullscreenControls" aria-hidden="true">
+    <div class="fullscreen-top">
+      <span class="fullscreen-pill"><span class="fullscreen-live-dot"></span>实时</span>
+      <span class="fullscreen-pill">高清 1080P</span>
+    </div>
+    <div class="fullscreen-bottom">
+      <span id="fullscreenTimestamp">--</span>
+      <div class="fullscreen-actions">
+        <button id="fullscreenPlayBtn" class="fullscreen-button" aria-label="播放或暂停">
+          <svg id="fullscreenPlayIcon" viewBox="0 0 24 24"><path class="fill-icon" d="M8 5v14l11-7z"/></svg>
+          <svg id="fullscreenPauseIcon" viewBox="0 0 24 24" style="display:none"><path d="M7 5v14M17 5v14"/></svg>
+        </button>
+        <button id="fullscreenRotateBtn" class="fullscreen-button" aria-label="旋转屏幕">
+          <svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 9a7 7 0 0 1 11.3-2.5L20 9M4 15l2.6 2.5A7 7 0 0 0 17.9 15"/></svg>
+        </button>
+        <button id="fullscreenExitBtn" class="fullscreen-button" aria-label="退出全屏">
+          <svg viewBox="0 0 24 24"><path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./uni.webview.1.5.8.js"></script>
   <script src="./flv.min.js"></script>
   <script>
     (function () {
       var videoEl = document.getElementById('video');
+      var placeholderEl = document.getElementById('placeholder');
       var tipEl = document.getElementById('tip');
       var tapLayerEl = document.getElementById('tapLayer');
       var coverEl = document.getElementById('cover');
       var loadingEl = document.getElementById('loading');
+      var fullscreenControlsEl = document.getElementById('fullscreenControls');
+      var fullscreenPlayIconEl = document.getElementById('fullscreenPlayIcon');
+      var fullscreenPauseIconEl = document.getElementById('fullscreenPauseIcon');
+      var fullscreenTimestampEl = document.getElementById('fullscreenTimestamp');
       var flvUrl = window.FLV_URL;
       var player = null;
       var retryTimer = null;
       var retryCount = 0;
       var MAX_RETRY = 5;
       var started = false; // 是否已经开始过播放，控制是否允许自动重试
+      var isPlaying = false;
+      var isExternalFullscreen = false;
+      var fullscreenControlsVisible = true;
+      var fullscreenControlsTimer = null;
 
       function showTip(text) {
         tipEl.textContent = text;
@@ -178,19 +313,61 @@
 
       function hideCover() {
         coverEl.style.display = 'none';
+        placeholderEl.style.display = 'none';
       }
 
       function showCover() {
         coverEl.style.display = 'flex';
+        placeholderEl.style.display = 'block';
         hideLoading();
       }
 
       function showLoading() {
+        coverEl.style.display = 'none';
+        placeholderEl.style.display = 'block';
         loadingEl.style.display = 'flex';
       }
 
       function hideLoading() {
         loadingEl.style.display = 'none';
+      }
+
+      function setFullscreenPlayIcon() {
+        fullscreenPlayIconEl.style.display = isPlaying ? 'none' : '';
+        fullscreenPauseIconEl.style.display = isPlaying ? '' : 'none';
+      }
+
+      function clearFullscreenControlsTimer() {
+        if (fullscreenControlsTimer) {
+          clearTimeout(fullscreenControlsTimer);
+          fullscreenControlsTimer = null;
+        }
+      }
+
+      function showFullscreenControls() {
+        fullscreenControlsVisible = true;
+        document.body.classList.remove('fullscreen-controls-hidden');
+        clearFullscreenControlsTimer();
+        if (isExternalFullscreen && isPlaying) {
+          fullscreenControlsTimer = setTimeout(hideFullscreenControls, 3000);
+        }
+      }
+
+      function hideFullscreenControls() {
+        fullscreenControlsVisible = false;
+        document.body.classList.add('fullscreen-controls-hidden');
+        clearFullscreenControlsTimer();
+      }
+
+      function setExternalFullscreen(enabled) {
+        isExternalFullscreen = enabled;
+        document.body.classList.toggle('external-fullscreen', enabled);
+        fullscreenControlsEl.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+        if (enabled) showFullscreenControls();
+        else {
+          document.body.classList.remove('fullscreen-controls-hidden');
+          clearFullscreenControlsTimer();
+        }
       }
 
       function notifyApp(type, detail) {
@@ -254,10 +431,13 @@
         // 拿到第一帧真实画面数据时才隐藏 loading，比 play() 的 Promise resolve 更准确
         videoEl.addEventListener('loadeddata', function onFirstFrame() {
           hideLoading();
-        });
+          notifyApp('first_frame');
+        }, { once: true });
 
         player.on(window.flvjs.Events.ERROR, function (errType, errDetail) {
           console.error('[flv.js error]', errType, errDetail);
+          isPlaying = false;
+          setFullscreenPlayIcon();
           notifyApp('error', { errType: errType, errDetail: errDetail });
           showCover();
           scheduleRetry();
@@ -276,11 +456,16 @@
           .play()
           .then(function () {
             retryCount = 0;
+            isPlaying = true;
+            setFullscreenPlayIcon();
             hideCover();
+            showFullscreenControls();
             notifyApp('play_success');
           })
           .catch(function (err) {
             console.warn('[flv.js] play() rejected', err);
+            isPlaying = false;
+            setFullscreenPlayIcon();
             showCover();
             notifyApp('play_rejected', String(err));
           });
@@ -310,11 +495,16 @@
           player
             .play()
             .then(function () {
+              isPlaying = true;
+              setFullscreenPlayIcon();
               hideCover();
               hideLoading();
+              showFullscreenControls();
               notifyApp('play_success');
             })
             .catch(function (err) {
+              isPlaying = false;
+              setFullscreenPlayIcon();
               showCover();
               notifyApp('play_rejected', String(err));
             });
@@ -325,6 +515,9 @@
         if (player) {
           player.pause();
         }
+        isPlaying = false;
+        setFullscreenPlayIcon();
+        showFullscreenControls();
         showCover();
         notifyApp('paused');
       }
@@ -341,6 +534,10 @@
           startPlay();
         } else if (action === 'pause') {
           pausePlay();
+        } else if (action === 'fullscreen_enter') {
+          setExternalFullscreen(true);
+        } else if (action === 'fullscreen_exit') {
+          setExternalFullscreen(false);
         }
       });
 
@@ -349,7 +546,39 @@
 
       // 点击视频区域（已经在播放时），通知外层切换导航栏/控制栏的显示状态（哔哩哔哩风格交互）
       tapLayerEl.addEventListener('click', function () {
-        notifyApp('toggle_controls');
+        if (isExternalFullscreen) {
+          fullscreenControlsVisible ? hideFullscreenControls() : showFullscreenControls();
+        } else {
+          notifyApp('toggle_controls');
+        }
+      });
+
+      document.getElementById('fullscreenPlayBtn').addEventListener('click', function (e) {
+        e.stopPropagation();
+        isPlaying ? pausePlay() : startPlay();
+      });
+      document.getElementById('fullscreenRotateBtn').addEventListener('click', function (e) {
+        e.stopPropagation();
+        notifyApp('request_rotate');
+      });
+      document.getElementById('fullscreenExitBtn').addEventListener('click', function (e) {
+        e.stopPropagation();
+        notifyApp('request_fullscreen_exit');
+      });
+
+      function updateFullscreenTimestamp() {
+        var now = new Date();
+        var pad = function (value) { return String(value).padStart(2, '0'); };
+        fullscreenTimestampEl.textContent = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()) + '  ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+      }
+      updateFullscreenTimestamp();
+      setInterval(updateFullscreenTimestamp, 1000);
+
+      document.addEventListener('touchmove', function (event) {
+        event.preventDefault();
+      }, { passive: false });
+      document.addEventListener('dragstart', function (event) {
+        event.preventDefault();
       });
 
       // 支持通过 URL query 参数动态传入播放地址，例如：

@@ -1,233 +1,208 @@
 <template>
   <view class="page">
-    <!-- 视频区域：正常模式下用 top/height 撑满导航栏和控制栏之间的区域；
-         全屏模式下 top=0、height=屏幕总高，铺满整个屏幕。
-         导航栏和控制栏用 position: absolute 悬浮在它上方，nvue 里后声明的元素层级更高，
-         能稳定盖住 web-view（这跟 vue 页面的 web-view 不同，nvue 的 web-view 不是"层级最高不受控"的特殊组件） -->
-    <web-view
-      v-if="webviewSrc"
-      ref="liveWebview"
-      class="webview"
-      :style="webviewStyle"
-      :src="webviewSrc"
-      @onPostMessage="onWebviewMessage"
-    ></web-view>
-    <view v-else class="fallback" :style="webviewStyle">
-      <text class="fallback-text">当前平台暂不支持 web-view 直播播放，请在 App/Android 端运行</text>
+    <view v-if="!isFullscreen" class="header" :style="{ height: headerHeight + 'px', paddingTop: statusBarHeight + 'px' }">
+      <view class="header-button" @click="goBack"><text class="back-icon">‹</text></view>
+      <view class="header-title"><text class="title">客厅摄像头</text><text class="subtitle">滨江公寓 · 01号设备</text></view>
+      <view class="header-button" @click="showToast('设备设置将在完整版本中开放')"><text class="more-icon">•••</text></view>
     </view>
 
-    <!-- 封面态：播放前显示，深色渐变背景 + 居中播放按钮，跟方案1保持统一视觉风格 -->
-    <view class="cover" :style="webviewStyle" v-if="!isPlaying && !isLoading" @click="togglePlay">
-      <view class="cover-play-btn">
-        <text class="cover-play-icon">▶</text>
+    <view class="viewer" :style="viewerStyle">
+      <web-view v-if="webviewSrc" ref="liveWebview" class="webview" :src="webviewSrc" :webview-styles="webviewStyles" @onPostMessage="onWebviewMessage"></web-view>
+      <view v-else class="fallback"><text class="fallback-text">当前平台暂不支持直播播放</text></view>
+
+      <view class="cover" v-if="!isFullscreen && !isPlaying && !isLoading" @click="togglePlay">
+        <view class="cover-button"><text class="cover-play">▶</text></view>
+        <text class="cover-text">点击播放实时画面</text>
       </view>
-      <text class="cover-text">点击播放直播</text>
+      <view v-if="!isFullscreen" class="video-top" :class="{ hidden: !controlsVisible }">
+        <view class="live-pill"><view class="live-dot"></view><text class="pill-text">实时</text></view>
+        <view class="quality-pill" @click="showToast('当前画质：高清 1080P')"><text class="pill-text">高清 1080P</text></view>
+      </view>
+      <view v-if="!isFullscreen" class="video-bottom" :class="{ hidden: !controlsVisible }">
+        <text class="timestamp">{{ timestamp }}</text>
+        <view class="video-actions">
+          <view class="video-button" @click="togglePlay"><text class="video-icon">{{ isPlaying ? 'Ⅱ' : '▶' }}</text></view>
+          <view class="video-button" @click="toggleRotate"><text class="video-icon">↻</text></view>
+          <view class="video-button" @click="toggleFullscreen"><text class="fullscreen-icon">{{ isFullscreen ? '⌟⌜' : '⌜⌟' }}</text></view>
+        </view>
+      </view>
     </view>
 
-    <!-- Loading 态：点击播放后、拿到首帧画面前显示 -->
-    <view class="loading" :style="webviewStyle" v-if="isLoading">
-      <view class="loading-spinner" :style="{ transform: 'rotate(' + spinnerAngle + 'deg)' }"></view>
-      <text class="loading-text">正在连接直播...</text>
-    </view>
+    <scroller v-if="!isFullscreen" class="content" :style="contentStyle">
+      <view class="status-row">
+        <view><text class="device-name">客厅 · 主视角</text><text class="device-detail">连接稳定 · 延迟 0.8 秒</text></view>
+        <view class="online"><view class="online-dot"></view><text class="online-text">设备在线</text></view>
+      </view>
 
-    <!-- 上：自定义导航栏，悬浮在视频区上方，半透明黑色渐变，哔哩哔哩风格 -->
-    <view
-      class="nav-bar"
-      :class="{ 'controls-hidden': !controlsVisible }"
-      :style="{ height: navBarHeight + 'px', paddingTop: statusBarHeight + 'px' }"
-    >
-      <view class="nav-back" @click="goBack">
-        <text class="nav-back-icon">‹</text>
-      </view>
-      <text class="nav-title">直播播放（方案2：nvue原生页面）</text>
-    </view>
+      <view class="timeline"><text class="timeline-text timeline-start">19:30</text><view class="track" :style="{ width: trackWidth + 'px' }"><view class="track-active" :style="{ width: trackActiveWidth + 'px' }"></view><view class="track-knob" :style="{ left: trackKnobLeft + 'px' }"></view></view><text class="timeline-text timeline-end">现在</text></view>
 
-    <!-- 下：播放控制栏，悬浮在视频区下方 -->
-    <view class="control-bar" :class="{ 'controls-hidden': !controlsVisible }">
-      <view class="ctrl-icon-btn" @click="togglePlay">
-        <text class="ctrl-icon">{{ isPlaying ? '❙❙' : '▶' }}</text>
+      <text class="section-label">快捷操作</text>
+      <view class="quick-actions">
+        <view class="action" :style="actionStyle" @click="showToast('截图功能等待业务接口接入')">
+          <view class="camera-icon"><view class="camera-top"></view><view class="camera-lens"></view></view>
+          <text class="action-text">截图</text>
+        </view>
+        <view class="action" :style="actionStyle" @click="showToast('录像功能等待业务接口接入')">
+          <view class="record-icon"><view class="record-dot"></view></view>
+          <text class="action-text">录像</text>
+        </view>
+        <view class="action" :style="actionStyle" @click="showToast('对讲功能等待业务接口接入')">
+          <view class="mic-icon"><view class="mic-capsule"></view><view class="mic-arc"></view><view class="mic-stem"></view><view class="mic-base"></view></view>
+          <text class="action-text">对讲</text>
+        </view>
+        <view class="action" :style="actionStyle" @click="showToast('回放功能等待业务接口接入')">
+          <view class="clock-icon"><view class="clock-hand-hour"></view><view class="clock-hand-minute"></view></view>
+          <text class="action-text">回放</text>
+        </view>
       </view>
-      <view class="live-badge">
-        <view class="live-dot"></view>
-        <text class="live-badge-text">直播中</text>
+
+      <text class="section-label">云台控制</text>
+      <view class="ptz-card" :style="{ width: contentWidth + 'px' }">
+        <view class="dpad" :style="{ width: dpadColumnWidth + 'px' }">
+          <view class="dpad-row"><view class="dpad-empty"></view><view class="dpad-key up" @click="showToast('摄像头向上移动')"><text class="dpad-text">↑</text></view><view class="dpad-empty"></view></view>
+          <view class="dpad-row"><view class="dpad-key left" @click="showToast('摄像头向左移动')"><text class="dpad-text">←</text></view><view class="dpad-center" @click="showToast('云台回到中心')"><text class="center-dot">●</text></view><view class="dpad-key right" @click="showToast('摄像头向右移动')"><text class="dpad-text">→</text></view></view>
+          <view class="dpad-row"><view class="dpad-empty"></view><view class="dpad-key down" @click="showToast('摄像头向下移动')"><text class="dpad-text">↓</text></view><view class="dpad-empty"></view></view>
+        </view>
+        <view class="zoom" :style="{ width: zoomColumnWidth + 'px' }"><text class="zoom-title">画面缩放</text><text class="zoom-copy">也可在画面上双指缩放</text><view class="stepper"><view class="step-button" @click="changeZoom(-0.1)"><text class="step-text">−</text></view><view class="zoom-value"><text class="zoom-value-text">{{ zoom.toFixed(1) }}×</text></view><view class="step-button" @click="changeZoom(0.1)"><text class="step-text">+</text></view></view></view>
       </view>
-      <view class="ctrl-spacer"></view>
-      <!-- 旋转屏幕按钮：独立于全屏按钮，用来主动切换横竖屏方向 -->
-      <view class="ctrl-icon-btn" @click="toggleRotate">
-        <text class="ctrl-icon">⟳</text>
-      </view>
-      <view class="ctrl-icon-btn" @click="toggleFullscreen">
-        <text class="ctrl-icon">{{ isFullscreen ? '⤡' : '⤢' }}</text>
-      </view>
-    </view>
+      <view class="bottom-space"></view>
+    </scroller>
+
+    <view v-if="toastVisible" class="toast"><text class="toast-text">{{ toastText }}</text></view>
   </view>
 </template>
 
 <script>
-// 直播流地址：拿到具体 FLV 地址后，只需要改这里
 const FLV_URL = 'https://srs.unsj.edu.ar/live/xama/xama.flv'
-
-const NAV_BAR_CONTENT_HEIGHT = 44 // 导航栏内容高度（不含状态栏）
-const CONTROL_BAR_HEIGHT = 44
+const HEADER_CONTENT_HEIGHT = 64
+const VIEWER_RATIO = 284 / 390
 
 export default {
   data() {
     return {
-      webviewSrc: '',
-      statusBarHeight: 0,
-      windowHeight: 0,
-      isPlaying: false,
-      isLoading: false,
-      isFullscreen: false,
-      isLandscape: false,
-      controlsVisible: true,
-      hideControlsTimer: null,
-      // nvue 不支持 CSS @keyframes 无限循环动画，旋转 loading 图标改用定时器持续
-      // 递增 rotate 角度并绑定到 :style 实现，这是 Weex 渲染引擎下唯一可行的方式
-      spinnerAngle: 0,
-      spinnerTimer: null,
+      webviewSrc: '', statusBarHeight: 0, windowHeight: 0, windowWidth: 390,
+      isPlaying: false, isLoading: false, isFullscreen: false, isLandscape: false,
+      controlsVisible: true, hideControlsTimer: null,
+      webviewStyles: { bounce: 'none', scrollIndicator: 'none', scalable: false },
+      timestamp: '', clockTimer: null, toastVisible: false, toastText: '', toastTimer: null, zoom: 1,
     }
   },
   computed: {
-    navBarHeight() {
-      return this.statusBarHeight + NAV_BAR_CONTENT_HEIGHT
+    headerHeight() { return this.statusBarHeight + HEADER_CONTENT_HEIGHT },
+    viewerHeight() { return Math.max(210, Math.min(284, this.windowWidth * VIEWER_RATIO)) },
+    viewerStyle() {
+      if (this.isFullscreen) return { top: '0px', height: this.windowHeight + 'px' }
+      return { top: this.headerHeight + 'px', height: this.viewerHeight + 'px' }
     },
-    // 正常模式：视频区顶部让出导航栏高度，底部让出控制栏高度
-    // 全屏模式：视频区铺满整个窗口（从 0 到 windowHeight），导航栏/控制栏仍然悬浮在上面
-    webviewStyle() {
-      if (this.isFullscreen) {
-        return { top: '0px', height: this.windowHeight + 'px' }
-      }
-      const height = this.windowHeight - this.navBarHeight - CONTROL_BAR_HEIGHT
-      return { top: this.navBarHeight + 'px', height: (height > 0 ? height : 0) + 'px' }
+    contentStyle() {
+      const top = this.headerHeight + this.viewerHeight
+      return { top: top + 'px', height: Math.max(0, this.windowHeight - top) + 'px' }
     },
+    contentWidth() { return Math.max(0, this.windowWidth - 28) },
+    actionWidth() { return Math.floor((this.contentWidth - 24) / 4) },
+    actionStyle() { return { width: this.actionWidth + 'px' } },
+    trackWidth() { return Math.max(120, this.contentWidth - 88) },
+    trackActiveWidth() { return Math.floor(this.trackWidth * 0.72) },
+    trackKnobLeft() { return this.trackActiveWidth - 5 },
+    dpadColumnWidth() { return Math.min(142, Math.floor(this.contentWidth * 0.42)) },
+    zoomColumnWidth() { return Math.max(116, this.contentWidth - this.dpadColumnWidth - 40) },
   },
   onLoad() {
-    const sysInfo = uni.getSystemInfoSync()
-    this.statusBarHeight = sysInfo.statusBarHeight || 0
-    this.windowHeight = sysInfo.windowHeight || sysInfo.screenHeight || 0
-    this.webviewSrc =
-      '/hybrid/html/flv-player.html?url=' + encodeURIComponent(FLV_URL)
+    this.updateWindowMetrics()
+    this.webviewSrc = '/hybrid/html/flv-player.html?url=' + encodeURIComponent(FLV_URL)
+    this.updateTimestamp()
+    this.clockTimer = setInterval(this.updateTimestamp, 1000)
   },
   onUnload() {
     this.clearAutoHideTimer()
-    this.stopSpinner()
+    if (this.clockTimer) clearInterval(this.clockTimer)
+    if (this.toastTimer) clearTimeout(this.toastTimer)
+    // #ifdef APP-PLUS
+    plus.screen.lockOrientation('portrait-primary')
+    plus.navigator.setFullscreen(false)
+    // #endif
+  },
+  onResize() {
+    this.updateWindowMetrics()
   },
   methods: {
-    goBack() {
-      uni.navigateBack({
-        delta: 1,
-      })
+    updateWindowMetrics() {
+      const info = uni.getSystemInfoSync()
+      this.statusBarHeight = info.statusBarHeight || 0
+      this.windowHeight = info.windowHeight || info.screenHeight || 0
+      this.windowWidth = info.windowWidth || info.screenWidth || 390
     },
-    // 通过 ref 拿到 web-view 实例，用 evalJS 向内部页面派发指令
-    // flv-player.html 里监听 window 上的自定义事件 uni-app-command 来响应
+    goBack() { uni.navigateBack({ delta: 1 }) },
     evalInWebview(action) {
-      if (this.$refs.liveWebview) {
-        this.$refs.liveWebview.evalJS(
-          "window.dispatchEvent(new CustomEvent('uni-app-command', { detail: { action: '" +
-            action +
-            "' } }))"
-        )
-      }
-    },
-    startSpinner() {
-      this.stopSpinner()
-      this.spinnerTimer = setInterval(() => {
-        this.spinnerAngle = (this.spinnerAngle + 30) % 360
-      }, 80)
-    },
-    stopSpinner() {
-      if (this.spinnerTimer) {
-        clearInterval(this.spinnerTimer)
-        this.spinnerTimer = null
-      }
+      if (this.$refs.liveWebview) this.$refs.liveWebview.evalJS("window.dispatchEvent(new CustomEvent('uni-app-command', { detail: { action: '" + action + "' } }))")
     },
     togglePlay() {
       if (this.isPlaying) {
         this.evalInWebview('pause')
         this.isPlaying = false
-        this.isLoading = false
-        this.stopSpinner()
-        this.showControls()
       } else {
         this.evalInWebview('play')
-        this.isLoading = true
-        this.startSpinner()
+        this.isPlaying = true
       }
+      this.isLoading = false
+      this.showControls()
     },
-    // 全屏是外层 nvue 布局的事：切换 webviewStyle 让 web-view 铺满整个窗口，
-    // 不依赖网页内部的 Fullscreen API（那个 API 无法突破 web-view 组件自身的边界）
     toggleFullscreen() {
-      this.isFullscreen = !this.isFullscreen
-      this.onFullscreenStateChanged()
+      const nextFullscreen = !this.isFullscreen
+      this.evalInWebview(nextFullscreen ? 'fullscreen_enter' : 'fullscreen_exit')
+      this.isFullscreen = nextFullscreen
+      // #ifdef APP-PLUS
+      plus.navigator.setFullscreen(this.isFullscreen)
+      // #endif
+      this.isFullscreen ? this.hideControls() : this.showControls()
+      this.$nextTick(this.updateWindowMetrics)
     },
-    // 旋转屏幕按钮：切横屏前先进入全屏（跟方案1保持一致的交互逻辑：横屏体验一般伴随全屏）
     toggleRotate() {
       this.isLandscape = !this.isLandscape
-      if (this.isLandscape && !this.isFullscreen) {
+      if (!this.isFullscreen) {
         this.isFullscreen = true
-        this.onFullscreenStateChanged()
-      } else {
-        this.showControls()
+        this.evalInWebview('fullscreen_enter')
+        // #ifdef APP-PLUS
+        plus.navigator.setFullscreen(true)
+        // #endif
       }
+      // #ifdef APP-PLUS
+      plus.screen.lockOrientation(this.isLandscape ? 'landscape-primary' : 'portrait-primary')
+      // #endif
+      this.isFullscreen ? this.hideControls() : this.showControls()
+      this.$nextTick(this.updateWindowMetrics)
     },
-    // 进入全屏后立即隐藏导航栏/控制栏，追求沉浸式体验，点击屏幕才重新浮现；
-    // 退出全屏后恢复显示，跟方案1（flv-player-h5.html）保持一致的交互逻辑
-    onFullscreenStateChanged() {
-      if (this.isFullscreen) {
-        this.hideControls()
-      } else {
-        this.showControls()
+    clearAutoHideTimer() { if (this.hideControlsTimer) { clearTimeout(this.hideControlsTimer); this.hideControlsTimer = null } },
+    showControls() { this.controlsVisible = true; this.clearAutoHideTimer(); if (this.isPlaying) this.hideControlsTimer = setTimeout(this.hideControls, 3000) },
+    hideControls() { this.controlsVisible = false; this.clearAutoHideTimer() },
+    showToast(text) { this.toastText = text; this.toastVisible = true; if (this.toastTimer) clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { this.toastVisible = false }, 1700) },
+    changeZoom(delta) { this.zoom = Math.max(0.5, Math.min(3, Number((this.zoom + delta).toFixed(1)))); this.showToast('画面缩放 ' + this.zoom.toFixed(1) + '×') },
+    updateTimestamp() { const d = new Date(); const p = n => String(n).padStart(2, '0'); this.timestamp = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '  ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) },
+    onWebviewMessage(event) {
+      let msg = event && event.detail && event.detail.data !== undefined
+        ? event.detail.data
+        : event
+      for (let depth = 0; depth < 5 && msg && !msg.type; depth += 1) {
+        if (Array.isArray(msg)) msg = msg[0]
+        else if (msg.detail !== undefined) msg = msg.detail
+        else if (msg.data !== undefined) msg = msg.data
+        else break
       }
-    },
-    showControls() {
-      this.controlsVisible = true
-      this.scheduleAutoHide()
-    },
-    hideControls() {
-      this.controlsVisible = false
-      this.clearAutoHideTimer()
-    },
-    toggleControlsVisible() {
-      if (this.controlsVisible) {
-        this.hideControls()
-      } else {
-        this.showControls()
-      }
-    },
-    clearAutoHideTimer() {
-      if (this.hideControlsTimer) {
-        clearTimeout(this.hideControlsTimer)
-        this.hideControlsTimer = null
-      }
-    },
-    scheduleAutoHide() {
-      this.clearAutoHideTimer()
-      // 只有播放中才自动隐藏，暂停时保持常驻显示
-      if (!this.isPlaying) return
-      this.hideControlsTimer = setTimeout(() => {
-        this.hideControls()
-      }, 3000)
-    },
-    // nvue 下 @onPostMessage 直接收到 data 对象，实际消息内容在 data.detail 里
-    onWebviewMessage(data) {
-      const detail = data && data.detail
-      const msg = Array.isArray(detail) ? detail[0] : detail
-      console.log('[web-view message]', msg)
       if (!msg) return
-      if (msg.type === 'play_success') {
-        this.isPlaying = true
-        this.isLoading = false
-        this.stopSpinner()
-        this.scheduleAutoHide()
-      } else if (msg.type === 'paused' || msg.type === 'play_rejected' || msg.type === 'error') {
-        this.isPlaying = false
-        this.isLoading = false
-        this.stopSpinner()
+      if (msg.type === 'play_success' || msg.type === 'first_frame') { this.isPlaying = true; this.isLoading = false; this.showControls() }
+      else if (msg.type === 'paused' || msg.type === 'play_rejected' || msg.type === 'error') { this.isPlaying = false; this.isLoading = false; this.showControls() }
+      else if (msg.type === 'toggle_controls') { this.controlsVisible ? this.hideControls() : this.showControls() }
+      else if (msg.type === 'request_rotate') { this.toggleRotate() }
+      else if (msg.type === 'request_fullscreen_exit') {
+        this.isFullscreen = false
+        this.isLandscape = false
+        this.evalInWebview('fullscreen_exit')
+        // #ifdef APP-PLUS
+        plus.screen.lockOrientation('portrait-primary')
+        plus.navigator.setFullscreen(false)
+        // #endif
         this.showControls()
-      } else if (msg.type === 'toggle_controls') {
-        // 用户点击了视频区域（网页内部的 tapLayer），切换导航栏/控制栏显示状态
-        this.toggleControlsVisible()
+        this.$nextTick(this.updateWindowMetrics)
       }
     },
   },
@@ -235,167 +210,21 @@ export default {
 </script>
 
 <style>
-.page {
-  flex: 1;
-  background-color: #0b0b0d;
-}
-
-.webview {
-  position: absolute;
-  left: 0;
-  right: 0;
-}
-
-.fallback {
-  position: absolute;
-  left: 0;
-  right: 0;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background-color: #0b0b0d;
-}
-
-.fallback-text {
-  color: #8f8f94;
-  text-align: center;
-}
-
-/* 封面态：跟方案1一样的深色配色，只是用 nvue 支持的纯色背景（nvue 不支持 radial-gradient） */
-.cover {
-  position: absolute;
-  left: 0;
-  right: 0;
-  align-items: center;
-  justify-content: center;
-  background-color: #14141a;
-}
-
-.cover-play-btn {
-  width: 64px;
-  height: 64px;
-  border-radius: 32px;
-  background-color: rgba(255, 255, 255, 0.14);
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 14px;
-}
-
-.cover-play-icon {
-  color: #ffffff;
-  font-size: 22px;
-}
-
-.cover-text {
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 13px;
-}
-
-.loading {
-  position: absolute;
-  left: 0;
-  right: 0;
-  align-items: center;
-  justify-content: center;
-  background-color: rgba(11, 11, 13, 0.65);
-}
-
-.loading-spinner {
-  width: 32px;
-  height: 32px;
-  border-radius: 16px;
-  border-width: 3px;
-  border-style: solid;
-  border-color: rgba(255, 255, 255, 0.25);
-  border-top-color: #ffffff;
-  margin-bottom: 12px;
-}
-
-.loading-text {
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 12px;
-}
-
-/* 导航栏和控制栏用 position: absolute 悬浮在 web-view 上方，
-   在 nvue 模板里它们声明在 web-view 之后，层级天然更高，能稳定盖住视频区域 */
-.nav-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  flex-direction: row;
-  align-items: center;
-  background-color: rgba(0, 0, 0, 0.55);
-}
-
-.nav-back {
-  width: 44px;
-  height: 44px;
-  align-items: center;
-  justify-content: center;
-}
-
-.nav-back-icon {
-  color: #ffffff;
-  font-size: 26px;
-  font-weight: bold;
-}
-
-.nav-title {
-  color: #ffffff;
-  font-size: 15px;
-}
-
-.control-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 44px;
-  flex-direction: row;
-  align-items: center;
-  padding-left: 8px;
-  padding-right: 8px;
-  background-color: rgba(0, 0, 0, 0.6);
-}
-
-.ctrl-spacer {
-  flex: 1;
-}
-
-.ctrl-icon-btn {
-  width: 40px;
-  height: 40px;
-  align-items: center;
-  justify-content: center;
-}
-
-.ctrl-icon {
-  color: #ffffff;
-  font-size: 18px;
-}
-
-.live-badge {
-  flex-direction: row;
-  align-items: center;
-  margin-left: 4px;
-}
-
-.live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 3px;
-  background-color: #ff4d4f;
-  margin-right: 4px;
-}
-
-.live-badge-text {
-  color: #ffffff;
-  font-size: 12px;
-}
-
-/* 控制层自动隐藏：透明度过渡，隐藏时不再接收点击 */
-.controls-hidden {
-  opacity: 0;
-}
+.page { flex:1; background-color:#f5f7f5; }
+.header { position:absolute; left:0; right:0; top:0; z-index:10; flex-direction:row; align-items:center; padding-left:10px; padding-right:10px; background-color:#111413; }
+.header-button { width:48px; height:64px; align-items:center; justify-content:center; }.back-icon { color:#fff; font-size:32px; font-weight:300; }.more-icon { color:#fff; font-size:18px; font-weight:700; }
+.header-title { flex:1; align-items:center; justify-content:center; }.title { color:#fff; font-size:16px; line-height:21px; font-weight:700; }.subtitle { color:rgba(255,255,255,.58); font-size:11px; line-height:16px; }
+.viewer { position:absolute; left:0; right:0; z-index:2; overflow:hidden; background-color:#131615; }.webview,.fallback { position:absolute; left:0; right:0; top:0; bottom:0; }.fallback { align-items:center; justify-content:center; }.fallback-text { color:#fff; font-size:13px; }
+.cover { position:absolute; left:0; right:0; top:0; bottom:0; z-index:5; align-items:center; justify-content:center; background-color:rgba(17,20,19,.55); }.cover-button { width:62px; height:62px; margin-bottom:12px; align-items:center; justify-content:center; border-width:1px; border-style:solid; border-color:rgba(255,255,255,.22); border-radius:31px; background-color:rgba(12,15,14,.66); }.cover-play { margin-left:3px; color:#fff; font-size:24px; }.cover-text { color:rgba(255,255,255,.78); font-size:12px; }
+.video-top,.video-bottom { position:absolute; left:14px; right:14px; z-index:7; flex-direction:row; align-items:center; justify-content:space-between; }.video-top { top:14px; }.video-bottom { bottom:13px; }.hidden { opacity:0; }
+.live-pill,.quality-pill { height:26px; padding-left:8px; padding-right:8px; flex-direction:row; align-items:center; border-width:1px; border-style:solid; border-color:rgba(255,255,255,.13); border-radius:5px; background-color:rgba(12,15,14,.65); }.live-dot { width:6px; height:6px; margin-right:6px; border-radius:3px; background-color:#ff5b47; }.pill-text { color:#fff; font-size:11px; font-weight:700; }.timestamp { color:#fff; font-size:11px; font-weight:600; }.video-actions { flex-direction:row; }.video-button { width:38px; height:38px; margin-left:4px; align-items:center; justify-content:center; border-radius:19px; background-color:rgba(12,15,14,.62); }.video-icon { color:#fff; font-size:16px; }.fullscreen-icon { color:#fff; font-size:15px; }
+.content { position:absolute; left:0; right:0; z-index:1; padding:14px; background-color:#f5f7f5; }.status-row { margin-bottom:13px; flex-direction:row; align-items:flex-start; justify-content:space-between; }.device-name { color:#161818; font-size:15px; line-height:22px; font-weight:700; }.device-detail { color:#737977; font-size:11px; line-height:17px; }.online { margin-top:4px; flex-direction:row; align-items:center; }.online-dot { width:7px; height:7px; margin-right:6px; border-radius:4px; background-color:#28a06a; }.online-text { color:#247b55; font-size:11px; font-weight:700; }
+.timeline { height:45px; margin-bottom:16px; padding-left:12px; padding-right:12px; flex-direction:row; align-items:center; border-width:1px; border-style:solid; border-color:#e5e8e6; border-radius:6px; background-color:#fff; }.timeline-text { color:#737977; font-size:10px; }.timeline-start { width:28px; }.timeline-end { width:20px; text-align:right; }.track { position:relative; height:2px; margin-left:8px; margin-right:8px; background-color:#dfe3e0; }.track-active { height:2px; background-color:#161818; }.track-knob { position:absolute; top:-4px; width:10px; height:10px; border-width:2px; border-style:solid; border-color:#fff; border-radius:5px; background-color:#161818; }
+.section-label { margin-bottom:9px; color:#737977; font-size:11px; line-height:16px; font-weight:700; }.quick-actions { margin-bottom:17px; flex-direction:row; justify-content:space-between; }.action { height:72px; align-items:center; justify-content:center; border-width:1px; border-style:solid; border-color:#e5e8e6; border-radius:6px; background-color:#fff; }.action-text { margin-top:6px; color:#161818; font-size:11px; line-height:15px; font-weight:600; text-align:center; }
+.camera-icon { position:relative; width:20px; height:15px; margin-top:3px; border-width:1.5px; border-style:solid; border-color:#161818; border-radius:2px; align-items:center; justify-content:center; }.camera-top { position:absolute; left:5px; top:-4px; width:8px; height:4px; border-top-left-radius:2px; border-top-right-radius:2px; background-color:#161818; }.camera-lens { width:6px; height:6px; border-width:1.5px; border-style:solid; border-color:#161818; border-radius:3px; }
+.record-icon { width:20px; height:20px; align-items:center; justify-content:center; border-width:1.5px; border-style:solid; border-color:#161818; border-radius:10px; }.record-dot { width:6px; height:6px; border-radius:3px; background-color:#161818; }
+.mic-icon { position:relative; width:20px; height:22px; align-items:center; }.mic-capsule { width:7px; height:13px; border-width:1.5px; border-style:solid; border-color:#161818; border-radius:4px; }.mic-arc { position:absolute; left:4px; top:7px; width:12px; height:9px; border-left-width:1.5px; border-right-width:1.5px; border-bottom-width:1.5px; border-style:solid; border-color:#161818; border-bottom-left-radius:7px; border-bottom-right-radius:7px; }.mic-stem { position:absolute; left:9px; top:16px; width:1.5px; height:4px; background-color:#161818; }.mic-base { position:absolute; left:6px; top:20px; width:8px; height:1.5px; background-color:#161818; }
+.clock-icon { position:relative; width:20px; height:20px; border-width:1.5px; border-style:solid; border-color:#161818; border-radius:10px; }.clock-hand-hour { position:absolute; left:9px; top:4px; width:1.5px; height:6px; background-color:#161818; }.clock-hand-minute { position:absolute; left:9px; top:9px; width:5px; height:1.5px; background-color:#161818; }
+.ptz-card { height:138px; padding:12px; flex-direction:row; align-items:center; border-width:1px; border-style:solid; border-color:#e5e8e6; border-radius:6px; background-color:#fff; }.dpad { width:142px; align-items:center; }.dpad-row { height:36px; flex-direction:row; }.dpad-key,.dpad-empty,.dpad-center { width:36px; height:36px; align-items:center; justify-content:center; }.dpad-key { background-color:#f0f2f0; }.up { border-top-left-radius:5px; border-top-right-radius:5px; }.left { border-top-left-radius:5px; border-bottom-left-radius:5px; }.right { border-top-right-radius:5px; border-bottom-right-radius:5px; }.down { border-bottom-left-radius:5px; border-bottom-right-radius:5px; }.dpad-center { border-radius:18px; background-color:#161818; }.dpad-text { color:#3f4542; font-size:16px; }.center-dot { color:#fff; font-size:10px; }.zoom { flex:1; }.zoom-title { color:#161818; font-size:13px; font-weight:700; }.zoom-copy { margin-top:5px; margin-bottom:14px; color:#737977; font-size:10px; }.stepper { height:38px; flex-direction:row; border-width:1px; border-style:solid; border-color:#e5e8e6; border-radius:5px; overflow:hidden; }.step-button { width:38px; align-items:center; justify-content:center; background-color:#f6f7f6; }.step-text { color:#161818; font-size:18px; }.zoom-value { flex:1; align-items:center; justify-content:center; border-left-width:1px; border-right-width:1px; border-style:solid; border-color:#e5e8e6; }.zoom-value-text { color:#161818; font-size:11px; font-weight:700; }.bottom-space { height:28px; }
+.toast { position:absolute; left:50px; right:50px; bottom:24px; z-index:30; height:38px; padding-left:14px; padding-right:14px; align-items:center; justify-content:center; border-radius:6px; background-color:rgba(20,23,22,.93); }.toast-text { color:#fff; font-size:12px; text-align:center; }
 </style>
