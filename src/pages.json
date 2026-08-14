@@ -7,9 +7,16 @@
 			}
 		},
 		{
-			"path": "pages/live/live",
+			"path": "pages/live-h5/live-h5",
 			"style": {
-				"navigationBarTitleText": "直播播放",
+				"navigationBarTitleText": "方案1：H5自绘UI",
+				"navigationStyle": "custom"
+			}
+		},
+		{
+			"path": "pages/live-nvue/live-nvue",
+			"style": {
+				"navigationBarTitleText": "方案2：nvue原生页面",
 				"navigationStyle": "custom",
 				"disableScroll": true
 			}

@@ -8,7 +8,7 @@
       <view class="nav-back" @click="goBack">
         <text class="nav-back-icon">‹</text>
       </view>
-      <text class="nav-title">直播播放</text>
+      <text class="nav-title">方案2：nvue 原生页面</text>
     </view>
 
     <!-- 中：nvue 下的 web-view 支持用 flex/宽高样式控制大小，不会像 vue 页面那样强制铺满全屏 -->

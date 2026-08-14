@@ -5,9 +5,13 @@
     </view>
 
     <view class="grid">
-      <view class="card" @click="goLive">
+      <view class="card" @click="goTo('/pages/live-h5/live-h5')">
         <view class="card-icon">▶</view>
-        <text class="card-text">直播播放</text>
+        <text class="card-text">方案1：H5自绘UI</text>
+      </view>
+      <view class="card" @click="goTo('/pages/live-nvue/live-nvue')">
+        <view class="card-icon">▶</view>
+        <text class="card-text">方案2：nvue原生页面</text>
       </view>
     </view>
   </view>
@@ -16,10 +20,8 @@
 <script>
 export default {
   methods: {
-    goLive() {
-      uni.navigateTo({
-        url: '/pages/live/live',
-      })
+    goTo(url) {
+      uni.navigateTo({ url })
     },
   },
 }
@@ -58,6 +60,9 @@ export default {
   align-items: center;
   justify-content: center;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.06);
+  margin: 10rpx;
+  padding: 10rpx;
+  box-sizing: border-box;
 }
 
 .card-icon {
@@ -67,7 +72,8 @@ export default {
 }
 
 .card-text {
-  font-size: 26rpx;
+  font-size: 22rpx;
   color: #333;
+  text-align: center;
 }
 </style>

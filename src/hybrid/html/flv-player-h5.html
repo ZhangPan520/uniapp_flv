@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FLV Live Player (H5 自绘 UI)</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    }
+    #app {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      background: #000;
+    }
+    /* 上：导航栏，网页内自绘，不依赖原生组件 */
+    #navBar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      height: 44px;
+      background: #1a1a1a;
+      box-sizing: border-box;
+    }
+    #backBtn {
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 26px;
+      font-weight: bold;
+    }
+    #navTitle {
+      color: #fff;
+      font-size: 16px;
+    }
+    /* 中：视频区域，自动占满剩余空间 */
+    #videoWrap {
+      flex: 1 1 auto;
+      position: relative;
+      min-height: 0;
+      background: #000;
+    }
+    #video {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      object-fit: contain;
+      pointer-events: none;
+    }
+    /* 隐藏 Chromium/Android WebView 给空的 <video> 元素自动叠加的原生播放遮罩按钮，
+       否则未开始播放前会显示一个巨大的圆形播放图标盖住整个画面 */
+    video::-webkit-media-controls,
+    video::-webkit-media-controls-enclosure,
+    video::-webkit-media-controls-panel,
+    video::-webkit-media-controls-play-button,
+    video::-webkit-media-controls-start-playback-button,
+    video::-webkit-media-controls-overlay-play-button,
+    video::-webkit-media-controls-overlay-enclosure {
+      display: none !important;
+      -webkit-appearance: none !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+    #tip {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      text-align: center;
+      color: #fff;
+      font-size: 14px;
+      padding: 0 20px;
+      display: none;
+      pointer-events: none;
+    }
+    /* 下：播放控制栏，网页内自绘 */
+    #controlBar {
+      flex: 0 0 auto;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      background: #1a1a1a;
+    }
+    .ctrl-btn {
+      padding: 8px 28px;
+      border-radius: 999px;
+      background: #333;
+      color: #fff;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .ctrl-btn:active {
+      background: #444;
+    }
+  </style>
+</head>
+<body>
+  <!-- 直播流地址：拿到具体地址后只需要改这一行 -->
+  <script>
+    window.FLV_URL = 'https://srs.unsj.edu.ar/live/xama/xama.flv';
+  </script>
+
+  <div id="app">
+    <div id="navBar">
+      <div id="backBtn">‹</div>
+      <div id="navTitle">方案1：H5 自绘 UI + postMessage 返回</div>
+    </div>
+
+    <div id="videoWrap">
+      <video id="video" playsinline webkit-playsinline></video>
+      <div id="tip"></div>
+    </div>
+
+    <div id="controlBar">
+      <div class="ctrl-btn" id="playBtn">播放</div>
+      <div class="ctrl-btn" id="fullscreenBtn">全屏</div>
+    </div>
+  </div>
+
+  <!-- 官方 uni-app webview 桥接 SDK：提供 uni.webView.navigateBack() 等方法，
+       可以直接调用返回，不依赖 @message 那种"仅在特定时机触发"的被动通信方式 -->
+  <script src="./uni.webview.1.5.8.js"></script>
+  <script src="./flv.min.js"></script>
+  <script>
+    (function () {
+      var videoEl = document.getElementById('video');
+      var tipEl = document.getElementById('tip');
+      var backBtnEl = document.getElementById('backBtn');
+      var playBtnEl = document.getElementById('playBtn');
+      var fullscreenBtnEl = document.getElementById('fullscreenBtn');
+      var navBarEl = document.getElementById('navBar');
+
+      var flvUrl = window.FLV_URL;
+      var player = null;
+      var retryTimer = null;
+      var retryCount = 0;
+      var MAX_RETRY = 5;
+      var started = false; // 是否已经开始过播放，控制是否允许自动重试
+      var isPlaying = false;
+
+      function showTip(text) {
+        tipEl.textContent = text;
+        tipEl.style.display = text ? 'block' : 'none';
+      }
+
+      function notifyApp(type, detail) {
+        // 通过 uni.postMessage 把事件上报给外层 vue 页面（web-view 的 @message）
+        try {
+          if (window.uni && typeof window.uni.postMessage === 'function') {
+            window.uni.postMessage({ data: { type: type, detail: detail } });
+          }
+        } catch (e) {
+          // 忽略桥不存在的情况
+        }
+      }
+
+      function setPlayBtnText() {
+        playBtnEl.textContent = isPlaying ? '暂停' : '播放';
+      }
+
+      function destroyPlayer() {
+        if (player) {
+          try {
+            player.pause();
+            player.unload();
+            player.detachMediaElement();
+            player.destroy();
+          } catch (e) {
+            // ignore
+          }
+          player = null;
+        }
+      }
+
+      function createPlayer() {
+        if (!window.flvjs || !window.flvjs.isSupported()) {
+          showTip('当前浏览器内核不支持 flv.js 播放（需要 MSE 支持）');
+          notifyApp('unsupported');
+          return;
+        }
+        if (!flvUrl || flvUrl.indexOf('your-flv-stream-url') !== -1) {
+          showTip('请先设置正确的直播流地址（FLV_URL）');
+          return;
+        }
+
+        destroyPlayer();
+        showTip('');
+
+        player = window.flvjs.createPlayer(
+          {
+            type: 'flv',
+            isLive: true,
+            url: flvUrl,
+          },
+          {
+            enableStashBuffer: false, // 直播场景关闭缓冲，降低延迟
+            stashInitialSize: 128,
+            autoCleanupSourceBuffer: true,
+          }
+        );
+
+        player.attachMediaElement(videoEl);
+
+        player.on(window.flvjs.Events.ERROR, function (errType, errDetail) {
+          console.error('[flv.js error]', errType, errDetail);
+          notifyApp('error', { errType: errType, errDetail: errDetail });
+          isPlaying = false;
+          setPlayBtnText();
+          scheduleRetry();
+        });
+
+        player.on(window.flvjs.Events.LOADING_COMPLETE, function () {
+          notifyApp('loading_complete');
+        });
+
+        player.on(window.flvjs.Events.RECOVERED_EARLY_EOF, function () {
+          notifyApp('recovered_early_eof');
+        });
+
+        player.load();
+        player
+          .play()
+          .then(function () {
+            retryCount = 0;
+            isPlaying = true;
+            setPlayBtnText();
+            notifyApp('play_success');
+          })
+          .catch(function (err) {
+            console.warn('[flv.js] play() rejected', err);
+            isPlaying = false;
+            setPlayBtnText();
+            notifyApp('play_rejected', String(err));
+          });
+      }
+
+      function scheduleRetry() {
+        if (!started) return; // 还没开始播放过，不自动重试
+        if (retryTimer) return;
+        if (retryCount >= MAX_RETRY) {
+          showTip('播放失败，请检查网络或直播源');
+          return;
+        }
+        retryCount += 1;
+        showTip('连接中断，正在重试 (' + retryCount + '/' + MAX_RETRY + ')...');
+        retryTimer = setTimeout(function () {
+          retryTimer = null;
+          createPlayer();
+        }, 2000);
+      }
+
+      function startPlay() {
+        started = true;
+        if (!player) {
+          createPlayer();
+        } else {
+          player
+            .play()
+            .then(function () {
+              isPlaying = true;
+              setPlayBtnText();
+              notifyApp('play_success');
+            })
+            .catch(function (err) {
+              isPlaying = false;
+              setPlayBtnText();
+              notifyApp('play_rejected', String(err));
+            });
+        }
+      }
+
+      function pausePlay() {
+        if (player) {
+          player.pause();
+        }
+        isPlaying = false;
+        setPlayBtnText();
+        notifyApp('paused');
+      }
+
+      function togglePlay() {
+        if (isPlaying) {
+          pausePlay();
+        } else {
+          startPlay();
+        }
+      }
+
+      function enterFullscreen() {
+        var el = videoEl;
+        try {
+          if (el.requestFullscreen) {
+            el.requestFullscreen();
+          } else if (el.webkitEnterFullscreen) {
+            // iOS Safari / 部分 Android WebView 的私有全屏 API，仅对 <video> 有效
+            el.webkitEnterFullscreen();
+          } else if (el.webkitRequestFullscreen) {
+            el.webkitRequestFullscreen();
+          } else {
+            notifyApp('fullscreen_unsupported');
+          }
+        } catch (e) {
+          console.warn('[flv.js] fullscreen failed', e);
+          notifyApp('fullscreen_failed', String(e));
+        }
+      }
+
+      function goBack() {
+        // 优先使用官方 uni.webview.js 提供的 uni.webView.navigateBack()，
+        // 它通过 evalJS 直接触发 App 侧的返回，不依赖 @message 那种
+        // "仅在后退/组件销毁/分享等特定时机才触发"的被动通信方式
+        if (window.uni && window.uni.webView && typeof window.uni.webView.navigateBack === 'function') {
+          window.uni.webView.navigateBack({ delta: 1 });
+        } else {
+          // SDK 还没就绪或环境不支持时的兜底方案
+          notifyApp('back');
+        }
+      }
+
+      backBtnEl.addEventListener('click', goBack);
+      playBtnEl.addEventListener('click', togglePlay);
+      fullscreenBtnEl.addEventListener('click', enterFullscreen);
+
+      // 支持通过 URL query 参数动态传入播放地址和状态栏高度，例如：
+      // /hybrid/html/flv-player-h5.html?url=https%3A%2F%2Fxxx.flv&statusBarHeight=44
+      function readParamsFromQuery() {
+        try {
+          var params = new URLSearchParams(window.location.search);
+          var u = params.get('url');
+          if (u) {
+            flvUrl = decodeURIComponent(u);
+          }
+          var statusBarHeight = parseFloat(params.get('statusBarHeight') || '0');
+          if (statusBarHeight > 0) {
+            navBarEl.style.paddingTop = statusBarHeight + 'px';
+            navBarEl.style.height = 44 + statusBarHeight + 'px';
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      readParamsFromQuery();
+      setPlayBtnText();
+      showTip('点击底部播放按钮开始播放');
+
+      document.addEventListener('visibilitychange', function () {
+        if (!started) return;
+        if (document.hidden) {
+          if (player) player.pause();
+        } else {
+          if (player) player.play().catch(function () {});
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
