@@ -10,19 +10,21 @@
       padding: 0;
       width: 100%;
       height: 100%;
-      background: #000;
+      background: #0b0b0d;
       overflow: hidden;
+      font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
     }
     #video {
       width: 100%;
       height: 100%;
-      background: #000;
+      background: #0b0b0d;
       object-fit: contain;
-      /* video 本身不接收触摸事件，播放/暂停/全屏统一由外部原生按钮通过 evalJS 驱动 */
+      /* video 本身不需要接收任何交互，点击热区统一由 #tapLayer 承担，
+         必须保留这个属性，否则浏览器内核会认为 video 是"可交互元素"，
+         重新画出它自己的原生播放遮罩（一个不受 CSS 隐藏规则控制的巨大圆环+三角形） */
       pointer-events: none;
     }
-    /* 隐藏 Chromium/Android WebView 给空的 <video> 元素自动叠加的原生播放遮罩按钮，
-       否则未开始播放前会显示一个巨大的圆形播放图标盖住整个画面 */
+    /* 隐藏 Chromium/Android WebView 给空的 <video> 元素自动叠加的原生播放遮罩按钮 */
     video::-webkit-media-controls,
     video::-webkit-media-controls-enclosure,
     video::-webkit-media-controls-panel,
@@ -35,6 +37,84 @@
       opacity: 0 !important;
       pointer-events: none !important;
     }
+    #tapLayer {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 5;
+    }
+    /* 播放前的封面态：深色渐变背景 + 居中播放按钮，直播场景没有素材可以提前截帧
+       （还没开始拉流，没有画面数据），用精心设计的空状态代替，而不是浏览器默认的丑陋图标 */
+    #cover {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      /* 必须比 #tapLayer 的 z-index 更高：封面显示期间要拦截点击触发播放，
+         而不是被 tapLayer 抢先拦截去做"切换控制层显示"（那个逻辑只在播放中才有意义） */
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 40%, #262631 0%, #14141a 60%, #0b0b0d 100%);
+    }
+    #coverPlayBtn {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.14);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+    #coverPlayBtn svg {
+      width: 26px;
+      height: 26px;
+      fill: #ffffff;
+      margin-left: 2px;
+    }
+    #coverText {
+      color: rgba(255, 255, 255, 0.75);
+      font-size: 13px;
+      letter-spacing: 0.5px;
+    }
+    /* Loading 层：点击播放后、拿到第一帧画面前显示 */
+    #loading {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 7;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(11, 11, 13, 0.65);
+    }
+    #loadingSpinner {
+      width: 34px;
+      height: 34px;
+      border: 3px solid rgba(255, 255, 255, 0.25);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    #loadingText {
+      color: rgba(255, 255, 255, 0.75);
+      font-size: 12px;
+    }
     #tip {
       position: fixed;
       left: 0;
@@ -44,10 +124,10 @@
       text-align: center;
       color: #fff;
       font-size: 14px;
-      font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
       padding: 0 20px;
       display: none;
       pointer-events: none;
+      z-index: 8;
     }
   </style>
 </head>
@@ -58,6 +138,22 @@
   </script>
 
   <video id="video" playsinline webkit-playsinline></video>
+
+  <!-- 封面态：播放前显示，点击后淡出并开始拉流 -->
+  <div id="cover">
+    <div id="coverPlayBtn">
+      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </div>
+    <div id="coverText">点击播放直播</div>
+  </div>
+
+  <!-- Loading 态：点击播放后、拿到首帧画面前显示 -->
+  <div id="loading">
+    <div id="loadingSpinner"></div>
+    <div id="loadingText">正在连接直播...</div>
+  </div>
+
+  <div id="tapLayer"></div>
   <div id="tip"></div>
 
   <script src="./flv.min.js"></script>
@@ -65,6 +161,9 @@
     (function () {
       var videoEl = document.getElementById('video');
       var tipEl = document.getElementById('tip');
+      var tapLayerEl = document.getElementById('tapLayer');
+      var coverEl = document.getElementById('cover');
+      var loadingEl = document.getElementById('loading');
       var flvUrl = window.FLV_URL;
       var player = null;
       var retryTimer = null;
@@ -75,6 +174,23 @@
       function showTip(text) {
         tipEl.textContent = text;
         tipEl.style.display = text ? 'block' : 'none';
+      }
+
+      function hideCover() {
+        coverEl.style.display = 'none';
+      }
+
+      function showCover() {
+        coverEl.style.display = 'flex';
+        hideLoading();
+      }
+
+      function showLoading() {
+        loadingEl.style.display = 'flex';
+      }
+
+      function hideLoading() {
+        loadingEl.style.display = 'none';
       }
 
       function notifyApp(type, detail) {
@@ -105,16 +221,20 @@
       function createPlayer() {
         if (!window.flvjs || !window.flvjs.isSupported()) {
           showTip('当前浏览器内核不支持 flv.js 播放（需要 MSE 支持）');
+          showCover();
           notifyApp('unsupported');
           return;
         }
         if (!flvUrl || flvUrl.indexOf('your-flv-stream-url') !== -1) {
           showTip('请先设置正确的直播流地址（FLV_URL）');
+          showCover();
+          notifyApp('play_rejected', 'invalid url');
           return;
         }
 
         destroyPlayer();
         showTip('');
+        showLoading();
 
         player = window.flvjs.createPlayer(
           {
@@ -131,9 +251,15 @@
 
         player.attachMediaElement(videoEl);
 
+        // 拿到第一帧真实画面数据时才隐藏 loading，比 play() 的 Promise resolve 更准确
+        videoEl.addEventListener('loadeddata', function onFirstFrame() {
+          hideLoading();
+        });
+
         player.on(window.flvjs.Events.ERROR, function (errType, errDetail) {
           console.error('[flv.js error]', errType, errDetail);
           notifyApp('error', { errType: errType, errDetail: errDetail });
+          showCover();
           scheduleRetry();
         });
 
@@ -150,10 +276,12 @@
           .play()
           .then(function () {
             retryCount = 0;
+            hideCover();
             notifyApp('play_success');
           })
           .catch(function (err) {
             console.warn('[flv.js] play() rejected', err);
+            showCover();
             notifyApp('play_rejected', String(err));
           });
       }
@@ -178,12 +306,16 @@
         if (!player) {
           createPlayer();
         } else {
+          showLoading();
           player
             .play()
             .then(function () {
+              hideCover();
+              hideLoading();
               notifyApp('play_success');
             })
             .catch(function (err) {
+              showCover();
               notifyApp('play_rejected', String(err));
             });
         }
@@ -193,38 +325,31 @@
         if (player) {
           player.pause();
         }
+        showCover();
         notifyApp('paused');
       }
 
-      function enterFullscreen() {
-        var el = videoEl;
-        try {
-          if (el.requestFullscreen) {
-            el.requestFullscreen();
-          } else if (el.webkitEnterFullscreen) {
-            // iOS Safari / 部分 Android WebView 的私有全屏 API，仅对 <video> 有效
-            el.webkitEnterFullscreen();
-          } else if (el.webkitRequestFullscreen) {
-            el.webkitRequestFullscreen();
-          } else {
-            notifyApp('fullscreen_unsupported');
-          }
-        } catch (e) {
-          console.warn('[flv.js] fullscreen failed', e);
-          notifyApp('fullscreen_failed', String(e));
-        }
-      }
+      // 注意：这里不再调用 video.requestFullscreen()。原因是这个网页运行在 nvue 里的
+      // <web-view> 组件内部，该组件在布局中只占据中间的 flex 区域（不是全屏），网页内部的
+      // Fullscreen API 顶多让视频铺满这个 web-view 自身的区域，无法突破组件边界盖住外层的
+      // 导航栏和控制栏。真正的全屏效果由外层 nvue 页面动态调整 web-view 的布局样式实现。
 
-      // 接收外层 nvue 页面通过 evalJS 派发的指令：play / pause / fullscreen
+      // 接收外层 nvue 页面通过 evalJS 派发的指令：play / pause
       window.addEventListener('uni-app-command', function (e) {
         var action = e && e.detail && e.detail.action;
         if (action === 'play') {
           startPlay();
         } else if (action === 'pause') {
           pausePlay();
-        } else if (action === 'fullscreen') {
-          enterFullscreen();
         }
+      });
+
+      // 点击封面直接开始播放
+      coverEl.addEventListener('click', startPlay);
+
+      // 点击视频区域（已经在播放时），通知外层切换导航栏/控制栏的显示状态（哔哩哔哩风格交互）
+      tapLayerEl.addEventListener('click', function () {
+        notifyApp('toggle_controls');
       });
 
       // 支持通过 URL query 参数动态传入播放地址，例如：
@@ -242,7 +367,6 @@
       }
 
       readUrlFromQuery();
-      showTip('点击底部播放按钮开始播放');
 
       document.addEventListener('visibilitychange', function () {
         if (!started) return;

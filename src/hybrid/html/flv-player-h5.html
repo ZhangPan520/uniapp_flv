@@ -14,55 +14,30 @@
       overflow: hidden;
       font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
     }
+    /* 整体容器：视频铺满全屏，requestFullscreen 作用在这个容器上（不是单独对 video），
+       这样进入全屏后自绘的导航栏/控制栏依然存在且可交互，符合哔哩哔哩类 App 的全屏体验 */
     #app {
       position: fixed;
       left: 0;
       right: 0;
       top: 0;
       bottom: 0;
-      display: flex;
-      flex-direction: column;
       background: #000;
-    }
-    /* 上：导航栏，网页内自绘，不依赖原生组件 */
-    #navBar {
-      flex: 0 0 auto;
-      display: flex;
-      align-items: center;
-      height: 44px;
-      background: #1a1a1a;
-      box-sizing: border-box;
-    }
-    #backBtn {
-      width: 44px;
-      height: 44px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #fff;
-      font-size: 26px;
-      font-weight: bold;
-    }
-    #navTitle {
-      color: #fff;
-      font-size: 16px;
-    }
-    /* 中：视频区域，自动占满剩余空间 */
-    #videoWrap {
-      flex: 1 1 auto;
-      position: relative;
-      min-height: 0;
-      background: #000;
+      overflow: hidden;
     }
     #video {
+      position: absolute;
+      left: 0;
+      top: 0;
       width: 100%;
       height: 100%;
       background: #000;
       object-fit: contain;
+      /* video 本身不接收任何交互，点击热区统一由 #tapLayer 承担，否则浏览器内核会认为
+         video 是"可交互元素"，重新画出它自己的原生播放遮罩（不受 CSS 隐藏规则控制） */
       pointer-events: none;
     }
-    /* 隐藏 Chromium/Android WebView 给空的 <video> 元素自动叠加的原生播放遮罩按钮，
-       否则未开始播放前会显示一个巨大的圆形播放图标盖住整个画面 */
+    /* 隐藏 Chromium/Android WebView 给空的 <video> 元素自动叠加的原生播放遮罩按钮 */
     video::-webkit-media-controls,
     video::-webkit-media-controls-enclosure,
     video::-webkit-media-controls-panel,
@@ -74,6 +49,16 @@
       -webkit-appearance: none !important;
       opacity: 0 !important;
       pointer-events: none !important;
+    }
+    /* 点击热区：铺满整个视频区域，用来切换控制层显示/隐藏，层级在视频之上、控制层之下 */
+    #tapLayer {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 5;
+      background: transparent;
     }
     #tip {
       position: absolute;
@@ -87,29 +72,162 @@
       padding: 0 20px;
       display: none;
       pointer-events: none;
+      z-index: 6;
     }
-    /* 下：播放控制栏，网页内自绘 */
-    #controlBar {
-      flex: 0 0 auto;
-      height: 56px;
+    /* 顶部导航栏：悬浮在视频上方，半透明黑色渐变，哔哩哔哩风格 */
+    #navBar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      height: 44px;
+      box-sizing: border-box;
+      background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    #backBtn {
+      width: 44px;
+      height: 44px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 24px;
-      background: #1a1a1a;
-    }
-    .ctrl-btn {
-      padding: 8px 28px;
-      border-radius: 999px;
-      background: #333;
       color: #fff;
-      font-size: 14px;
+      font-size: 26px;
+      font-weight: bold;
+    }
+    #navTitle {
+      color: #fff;
+      font-size: 15px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+    }
+    /* 底部控制栏：悬浮在视频下方，半透明黑色渐变 */
+    #controlBar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 10;
+      height: 44px;
+      box-sizing: border-box;
+      padding: 0 8px;
+      display: flex;
+      align-items: center;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0));
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    .ctrl-icon-btn {
+      width: 40px;
+      height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
+      color: #fff;
+      flex-shrink: 0;
     }
-    .ctrl-btn:active {
-      background: #444;
+    .ctrl-icon-btn svg {
+      width: 20px;
+      height: 20px;
+      fill: #fff;
+    }
+    #liveBadge {
+      display: flex;
+      align-items: center;
+      margin-left: 4px;
+      color: #fff;
+      font-size: 12px;
+    }
+    #liveDot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ff4d4f;
+      margin-right: 4px;
+    }
+    .ctrl-spacer {
+      flex: 1;
+    }
+    /* 控制层整体：导航栏和控制栏统一被这个类控制显示/隐藏 */
+    .controls-hidden #navBar {
+      opacity: 0;
+      transform: translateY(-8px);
+      pointer-events: none;
+    }
+    .controls-hidden #controlBar {
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+    }
+    /* 播放前的封面态：深色渐变背景 + 居中播放按钮，直播场景没有素材可以提前截帧
+       （还没开始拉流，没有画面数据），用精心设计的空状态代替浏览器默认的丑陋图标 */
+    #cover {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 8;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 40%, #262631 0%, #14141a 60%, #0b0b0d 100%);
+    }
+    #coverPlayBtn {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.14);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+    #coverPlayBtn svg {
+      width: 26px;
+      height: 26px;
+      fill: #ffffff;
+      margin-left: 2px;
+    }
+    #coverText {
+      color: rgba(255, 255, 255, 0.75);
+      font-size: 13px;
+      letter-spacing: 0.5px;
+    }
+    /* Loading 层：点击播放后、拿到第一帧画面前显示，覆盖在封面之上，
+       直播拉流有网络延迟，这段时间不能是空白或者卡在播放按钮不动 */
+    #loading {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 9;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      background: rgba(11, 11, 13, 0.65);
+    }
+    #loadingSpinner {
+      width: 34px;
+      height: 34px;
+      border: 3px solid rgba(255, 255, 255, 0.25);
+      border-top-color: #ffffff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 12px;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    #loadingText {
+      color: rgba(255, 255, 255, 0.75);
+      font-size: 12px;
     }
   </style>
 </head>
@@ -120,19 +238,46 @@
   </script>
 
   <div id="app">
-    <div id="navBar">
-      <div id="backBtn">‹</div>
-      <div id="navTitle">方案1：H5 自绘 UI + postMessage 返回</div>
+    <video id="video" playsinline webkit-playsinline></video>
+    <div id="tapLayer"></div>
+    <div id="tip"></div>
+
+    <!-- 封面态：播放前显示，点击后淡出并开始拉流 -->
+    <div id="cover">
+      <div id="coverPlayBtn">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <div id="coverText">点击播放直播</div>
     </div>
 
-    <div id="videoWrap">
-      <video id="video" playsinline webkit-playsinline></video>
-      <div id="tip"></div>
+    <!-- Loading 态：点击播放后、拿到首帧画面前显示 -->
+    <div id="loading">
+      <div id="loadingSpinner"></div>
+      <div id="loadingText">正在连接直播...</div>
+    </div>
+
+    <div id="navBar">
+      <div id="backBtn" class="ctrl-icon-btn">
+        <svg viewBox="0 0 24 24"><path d="M15.5 4.5L8 12l7.5 7.5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div id="navTitle">直播播放（方案1：H5自绘UI）</div>
     </div>
 
     <div id="controlBar">
-      <div class="ctrl-btn" id="playBtn">播放</div>
-      <div class="ctrl-btn" id="fullscreenBtn">全屏</div>
+      <div id="playBtn" class="ctrl-icon-btn">
+        <svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none;"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+      </div>
+      <div id="liveBadge"><span id="liveDot"></span>直播中</div>
+      <div class="ctrl-spacer"></div>
+      <!-- 旋转屏幕按钮：独立于全屏按钮，用来主动切换横竖屏方向，不依赖手机自身的重力感应旋转开关 -->
+      <div id="rotateBtn" class="ctrl-icon-btn">
+        <svg viewBox="0 0 24 24"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.28 0 12 0l-.66.03 3.81 3.81 1.33-1.32zM10.23 1.75c-.2-.2-.51-.2-.71 0L4.11 7.36c-.2.2-.2.51 0 .71l5.41 5.61c.2.2.51.2.71 0l5.41-5.61c.2-.2.2-.51 0-.71l-5.41-5.61zM1.05 11H2.6c.35-3.77 2.72-6.94 5.97-8.48L7.24 1.2 1.05 11zm0 2c.36 6.16 5.52 11 11.79 11 .22 0 .44-.01.66-.03l-3.81-3.81-1.32 1.33c-3.27-1.54-5.63-4.7-5.98-8.49H1.05z"/></svg>
+      </div>
+      <div id="fullscreenBtn" class="ctrl-icon-btn">
+        <svg id="fsEnterIcon" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+        <svg id="fsExitIcon" viewBox="0 0 24 24" style="display:none;"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
+      </div>
     </div>
   </div>
 
@@ -142,11 +287,20 @@
   <script src="./flv.min.js"></script>
   <script>
     (function () {
+      var appEl = document.getElementById('app');
       var videoEl = document.getElementById('video');
       var tipEl = document.getElementById('tip');
+      var tapLayerEl = document.getElementById('tapLayer');
+      var coverEl = document.getElementById('cover');
+      var loadingEl = document.getElementById('loading');
       var backBtnEl = document.getElementById('backBtn');
       var playBtnEl = document.getElementById('playBtn');
+      var playIconEl = document.getElementById('playIcon');
+      var pauseIconEl = document.getElementById('pauseIcon');
+      var rotateBtnEl = document.getElementById('rotateBtn');
       var fullscreenBtnEl = document.getElementById('fullscreenBtn');
+      var fsEnterIconEl = document.getElementById('fsEnterIcon');
+      var fsExitIconEl = document.getElementById('fsExitIcon');
       var navBarEl = document.getElementById('navBar');
 
       var flvUrl = window.FLV_URL;
@@ -156,14 +310,34 @@
       var MAX_RETRY = 5;
       var started = false; // 是否已经开始过播放，控制是否允许自动重试
       var isPlaying = false;
+      var isFullscreen = false;
+      var isLandscape = false;
+      var hideControlsTimer = null;
+      var controlsVisible = true;
 
       function showTip(text) {
         tipEl.textContent = text;
         tipEl.style.display = text ? 'block' : 'none';
       }
 
+      function hideCover() {
+        coverEl.style.display = 'none';
+      }
+
+      function showCover() {
+        coverEl.style.display = 'flex';
+        hideLoading();
+      }
+
+      function showLoading() {
+        loadingEl.style.display = 'flex';
+      }
+
+      function hideLoading() {
+        loadingEl.style.display = 'none';
+      }
+
       function notifyApp(type, detail) {
-        // 通过 uni.postMessage 把事件上报给外层 vue 页面（web-view 的 @message）
         try {
           if (window.uni && typeof window.uni.postMessage === 'function') {
             window.uni.postMessage({ data: { type: type, detail: detail } });
@@ -173,8 +347,52 @@
         }
       }
 
-      function setPlayBtnText() {
-        playBtnEl.textContent = isPlaying ? '暂停' : '播放';
+      // ---- 控制层显示/隐藏：模拟哔哩哔哩的交互 ----
+      // 播放中几秒无操作自动隐藏；暂停时常驻显示；点击视频区域切换显示状态
+      function showControls() {
+        controlsVisible = true;
+        appEl.classList.remove('controls-hidden');
+        scheduleAutoHide();
+      }
+
+      function hideControls() {
+        controlsVisible = false;
+        appEl.classList.add('controls-hidden');
+        clearAutoHide();
+      }
+
+      function toggleControls() {
+        if (controlsVisible) {
+          hideControls();
+        } else {
+          showControls();
+        }
+      }
+
+      function clearAutoHide() {
+        if (hideControlsTimer) {
+          clearTimeout(hideControlsTimer);
+          hideControlsTimer = null;
+        }
+      }
+
+      function scheduleAutoHide() {
+        clearAutoHide();
+        // 只有播放中才自动隐藏，暂停/未播放时保持常驻，方便用户随时点击播放
+        if (!isPlaying) return;
+        hideControlsTimer = setTimeout(function () {
+          hideControls();
+        }, 3000);
+      }
+
+      function setPlayIcon() {
+        playIconEl.style.display = isPlaying ? 'none' : '';
+        pauseIconEl.style.display = isPlaying ? '' : 'none';
+      }
+
+      function setFullscreenIcon() {
+        fsEnterIconEl.style.display = isFullscreen ? 'none' : '';
+        fsExitIconEl.style.display = isFullscreen ? '' : 'none';
       }
 
       function destroyPlayer() {
@@ -194,16 +412,20 @@
       function createPlayer() {
         if (!window.flvjs || !window.flvjs.isSupported()) {
           showTip('当前浏览器内核不支持 flv.js 播放（需要 MSE 支持）');
+          showCover();
           notifyApp('unsupported');
           return;
         }
         if (!flvUrl || flvUrl.indexOf('your-flv-stream-url') !== -1) {
           showTip('请先设置正确的直播流地址（FLV_URL）');
+          showCover();
+          notifyApp('play_rejected', 'invalid url');
           return;
         }
 
         destroyPlayer();
         showTip('');
+        showLoading();
 
         player = window.flvjs.createPlayer(
           {
@@ -212,7 +434,7 @@
             url: flvUrl,
           },
           {
-            enableStashBuffer: false, // 直播场景关闭缓冲，降低延迟
+            enableStashBuffer: false,
             stashInitialSize: 128,
             autoCleanupSourceBuffer: true,
           }
@@ -220,11 +442,19 @@
 
         player.attachMediaElement(videoEl);
 
+        // 拿到第一帧真实画面数据时才算连接成功，这时才隐藏 loading，
+        // 比 play() 的 Promise resolve 更准确（resolve 只代表调用成功，不代表已经有画面）
+        videoEl.addEventListener('loadeddata', function onFirstFrame() {
+          hideLoading();
+        });
+
         player.on(window.flvjs.Events.ERROR, function (errType, errDetail) {
           console.error('[flv.js error]', errType, errDetail);
           notifyApp('error', { errType: errType, errDetail: errDetail });
           isPlaying = false;
-          setPlayBtnText();
+          setPlayIcon();
+          showControls();
+          showCover();
           scheduleRetry();
         });
 
@@ -242,19 +472,23 @@
           .then(function () {
             retryCount = 0;
             isPlaying = true;
-            setPlayBtnText();
+            setPlayIcon();
+            hideCover();
+            scheduleAutoHide();
             notifyApp('play_success');
           })
           .catch(function (err) {
             console.warn('[flv.js] play() rejected', err);
             isPlaying = false;
-            setPlayBtnText();
+            setPlayIcon();
+            showControls();
+            showCover();
             notifyApp('play_rejected', String(err));
           });
       }
 
       function scheduleRetry() {
-        if (!started) return; // 还没开始播放过，不自动重试
+        if (!started) return;
         if (retryTimer) return;
         if (retryCount >= MAX_RETRY) {
           showTip('播放失败，请检查网络或直播源');
@@ -273,16 +507,21 @@
         if (!player) {
           createPlayer();
         } else {
+          showLoading();
           player
             .play()
             .then(function () {
               isPlaying = true;
-              setPlayBtnText();
+              setPlayIcon();
+              hideCover();
+              hideLoading();
+              scheduleAutoHide();
               notifyApp('play_success');
             })
             .catch(function (err) {
               isPlaying = false;
-              setPlayBtnText();
+              setPlayIcon();
+              showCover();
               notifyApp('play_rejected', String(err));
             });
         }
@@ -293,7 +532,8 @@
           player.pause();
         }
         isPlaying = false;
-        setPlayBtnText();
+        setPlayIcon();
+        showControls();
         notifyApp('paused');
       }
 
@@ -305,16 +545,17 @@
         }
       }
 
+      // requestFullscreen 作用在整个 #app 容器上（不是单独 video），
+      // 这样全屏后导航栏/控制栏依然叠在视频上方，可以继续点返回、暂停、退出全屏
       function enterFullscreen() {
-        var el = videoEl;
         try {
-          if (el.requestFullscreen) {
-            el.requestFullscreen();
-          } else if (el.webkitEnterFullscreen) {
-            // iOS Safari / 部分 Android WebView 的私有全屏 API，仅对 <video> 有效
-            el.webkitEnterFullscreen();
-          } else if (el.webkitRequestFullscreen) {
-            el.webkitRequestFullscreen();
+          if (appEl.requestFullscreen) {
+            appEl.requestFullscreen();
+          } else if (appEl.webkitRequestFullscreen) {
+            appEl.webkitRequestFullscreen();
+          } else if (videoEl.webkitEnterFullscreen) {
+            // 极端兼容情况下退化为只对 video 全屏（此时自绘按钮会被系统全屏层盖住）
+            videoEl.webkitEnterFullscreen();
           } else {
             notifyApp('fullscreen_unsupported');
           }
@@ -324,24 +565,123 @@
         }
       }
 
+      function exitFullscreen() {
+        try {
+          if (document.exitFullscreen) {
+            document.exitFullscreen();
+          } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          }
+        } catch (e) {
+          console.warn('[flv.js] exit fullscreen failed', e);
+        }
+      }
+
+      function toggleFullscreen() {
+        if (isFullscreen) {
+          exitFullscreen();
+        } else {
+          enterFullscreen();
+        }
+      }
+
+      function onFullscreenChange() {
+        isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        setFullscreenIcon();
+        notifyApp(isFullscreen ? 'fullscreen_enter' : 'fullscreen_exit');
+        if (isFullscreen) {
+          // 进入全屏后立即隐藏控制层，追求沉浸式体验，点击屏幕才重新浮现
+          hideControls();
+        } else {
+          // 退出全屏时恢复显示控制层，并解除横屏锁定，避免屏幕方向卡在横屏状态
+          showControls();
+          unlockOrientation();
+        }
+      }
+
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+      document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+      // 旋转屏幕按钮：Screen Orientation API 要求先进入全屏才允许锁定方向，
+      // 这是浏览器的标准安全限制（非全屏状态下调用 lock 会被拒绝），因此这里复用现有的全屏能力
+      function lockOrientation(orientation) {
+        try {
+          if (screen.orientation && screen.orientation.lock) {
+            return screen.orientation.lock(orientation);
+          }
+          // 部分旧内核使用不带 Promise 的私有 API
+          if (screen.lockOrientation) {
+            screen.lockOrientation(orientation);
+          }
+        } catch (e) {
+          console.warn('[flv.js] lock orientation failed', e);
+        }
+        return Promise.resolve();
+      }
+
+      function unlockOrientation() {
+        try {
+          if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+          } else if (screen.unlockOrientation) {
+            screen.unlockOrientation();
+          }
+        } catch (e) {
+          // ignore
+        }
+        isLandscape = false;
+      }
+
+      function toggleRotate() {
+        if (!isLandscape) {
+          // 切横屏前先确保处于全屏状态，否则大概率被浏览器拒绝
+          if (!isFullscreen) {
+            enterFullscreen();
+          }
+          Promise.resolve(lockOrientation('landscape')).then(function () {
+            isLandscape = true;
+            notifyApp('orientation_landscape');
+          });
+        } else {
+          Promise.resolve(lockOrientation('portrait')).then(function () {
+            isLandscape = false;
+            notifyApp('orientation_portrait');
+          });
+        }
+      }
+
       function goBack() {
-        // 优先使用官方 uni.webview.js 提供的 uni.webView.navigateBack()，
-        // 它通过 evalJS 直接触发 App 侧的返回，不依赖 @message 那种
-        // "仅在后退/组件销毁/分享等特定时机才触发"的被动通信方式
         if (window.uni && window.uni.webView && typeof window.uni.webView.navigateBack === 'function') {
           window.uni.webView.navigateBack({ delta: 1 });
         } else {
-          // SDK 还没就绪或环境不支持时的兜底方案
           notifyApp('back');
         }
       }
 
-      backBtnEl.addEventListener('click', goBack);
-      playBtnEl.addEventListener('click', togglePlay);
-      fullscreenBtnEl.addEventListener('click', enterFullscreen);
+      backBtnEl.addEventListener('click', function (e) {
+        e.stopPropagation();
+        goBack();
+      });
+      playBtnEl.addEventListener('click', function (e) {
+        e.stopPropagation();
+        togglePlay();
+      });
+      rotateBtnEl.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleRotate();
+      });
+      fullscreenBtnEl.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleFullscreen();
+      });
+      // 点击视频区域（非按钮区域）切换控制层显示/隐藏，这是哔哩哔哩类播放器的标准交互
+      tapLayerEl.addEventListener('click', toggleControls);
+      // 点击封面直接开始播放
+      coverEl.addEventListener('click', function (e) {
+        e.stopPropagation();
+        startPlay();
+      });
 
-      // 支持通过 URL query 参数动态传入播放地址和状态栏高度，例如：
-      // /hybrid/html/flv-player-h5.html?url=https%3A%2F%2Fxxx.flv&statusBarHeight=44
       function readParamsFromQuery() {
         try {
           var params = new URLSearchParams(window.location.search);
@@ -360,8 +700,9 @@
       }
 
       readParamsFromQuery();
-      setPlayBtnText();
-      showTip('点击底部播放按钮开始播放');
+      setPlayIcon();
+      setFullscreenIcon();
+      showControls();
 
       document.addEventListener('visibilitychange', function () {
         if (!started) return;

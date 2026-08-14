@@ -1,35 +1,63 @@
 <template>
   <view class="page">
-    <!-- 上：自定义导航栏，固定高度，正常占位 -->
+    <!-- 视频区域：正常模式下用 top/height 撑满导航栏和控制栏之间的区域；
+         全屏模式下 top=0、height=屏幕总高，铺满整个屏幕。
+         导航栏和控制栏用 position: absolute 悬浮在它上方，nvue 里后声明的元素层级更高，
+         能稳定盖住 web-view（这跟 vue 页面的 web-view 不同，nvue 的 web-view 不是"层级最高不受控"的特殊组件） -->
+    <web-view
+      v-if="webviewSrc"
+      ref="liveWebview"
+      class="webview"
+      :style="webviewStyle"
+      :src="webviewSrc"
+      @onPostMessage="onWebviewMessage"
+    ></web-view>
+    <view v-else class="fallback" :style="webviewStyle">
+      <text class="fallback-text">当前平台暂不支持 web-view 直播播放，请在 App/Android 端运行</text>
+    </view>
+
+    <!-- 封面态：播放前显示，深色渐变背景 + 居中播放按钮，跟方案1保持统一视觉风格 -->
+    <view class="cover" :style="webviewStyle" v-if="!isPlaying && !isLoading" @click="togglePlay">
+      <view class="cover-play-btn">
+        <text class="cover-play-icon">▶</text>
+      </view>
+      <text class="cover-text">点击播放直播</text>
+    </view>
+
+    <!-- Loading 态：点击播放后、拿到首帧画面前显示 -->
+    <view class="loading" :style="webviewStyle" v-if="isLoading">
+      <view class="loading-spinner" :style="{ transform: 'rotate(' + spinnerAngle + 'deg)' }"></view>
+      <text class="loading-text">正在连接直播...</text>
+    </view>
+
+    <!-- 上：自定义导航栏，悬浮在视频区上方，半透明黑色渐变，哔哩哔哩风格 -->
     <view
       class="nav-bar"
+      :class="{ 'controls-hidden': !controlsVisible }"
       :style="{ height: navBarHeight + 'px', paddingTop: statusBarHeight + 'px' }"
     >
       <view class="nav-back" @click="goBack">
         <text class="nav-back-icon">‹</text>
       </view>
-      <text class="nav-title">方案2：nvue 原生页面</text>
+      <text class="nav-title">直播播放（方案2：nvue原生页面）</text>
     </view>
 
-    <!-- 中：nvue 下的 web-view 支持用 flex/宽高样式控制大小，不会像 vue 页面那样强制铺满全屏 -->
-    <web-view
-      v-if="webviewSrc"
-      ref="liveWebview"
-      class="webview"
-      :src="webviewSrc"
-      @onPostMessage="onWebviewMessage"
-    ></web-view>
-    <view v-else class="fallback">
-      <text class="fallback-text">当前平台暂不支持 web-view 直播播放，请在 App/Android 端运行</text>
-    </view>
-
-    <!-- 下：播放控制栏，固定高度，正常占位 -->
-    <view class="control-bar">
-      <view class="play-btn" @click="togglePlay">
-        <text class="play-btn-text">{{ isPlaying ? '暂停' : '播放' }}</text>
+    <!-- 下：播放控制栏，悬浮在视频区下方 -->
+    <view class="control-bar" :class="{ 'controls-hidden': !controlsVisible }">
+      <view class="ctrl-icon-btn" @click="togglePlay">
+        <text class="ctrl-icon">{{ isPlaying ? '❙❙' : '▶' }}</text>
       </view>
-      <view class="fullscreen-btn" @click="enterFullscreen">
-        <text class="fullscreen-btn-text">全屏</text>
+      <view class="live-badge">
+        <view class="live-dot"></view>
+        <text class="live-badge-text">直播中</text>
+      </view>
+      <view class="ctrl-spacer"></view>
+      <!-- 旋转屏幕按钮：独立于全屏按钮，用来主动切换横竖屏方向 -->
+      <view class="ctrl-icon-btn" @click="toggleRotate">
+        <text class="ctrl-icon">⟳</text>
+      </view>
+      <view class="ctrl-icon-btn" @click="toggleFullscreen">
+        <text class="ctrl-icon">{{ isFullscreen ? '⤡' : '⤢' }}</text>
       </view>
     </view>
   </view>
@@ -40,25 +68,50 @@
 const FLV_URL = 'https://srs.unsj.edu.ar/live/xama/xama.flv'
 
 const NAV_BAR_CONTENT_HEIGHT = 44 // 导航栏内容高度（不含状态栏）
+const CONTROL_BAR_HEIGHT = 44
 
 export default {
   data() {
     return {
       webviewSrc: '',
       statusBarHeight: 0,
+      windowHeight: 0,
       isPlaying: false,
+      isLoading: false,
+      isFullscreen: false,
+      isLandscape: false,
+      controlsVisible: true,
+      hideControlsTimer: null,
+      // nvue 不支持 CSS @keyframes 无限循环动画，旋转 loading 图标改用定时器持续
+      // 递增 rotate 角度并绑定到 :style 实现，这是 Weex 渲染引擎下唯一可行的方式
+      spinnerAngle: 0,
+      spinnerTimer: null,
     }
   },
   computed: {
     navBarHeight() {
       return this.statusBarHeight + NAV_BAR_CONTENT_HEIGHT
     },
+    // 正常模式：视频区顶部让出导航栏高度，底部让出控制栏高度
+    // 全屏模式：视频区铺满整个窗口（从 0 到 windowHeight），导航栏/控制栏仍然悬浮在上面
+    webviewStyle() {
+      if (this.isFullscreen) {
+        return { top: '0px', height: this.windowHeight + 'px' }
+      }
+      const height = this.windowHeight - this.navBarHeight - CONTROL_BAR_HEIGHT
+      return { top: this.navBarHeight + 'px', height: (height > 0 ? height : 0) + 'px' }
+    },
   },
   onLoad() {
     const sysInfo = uni.getSystemInfoSync()
     this.statusBarHeight = sysInfo.statusBarHeight || 0
+    this.windowHeight = sysInfo.windowHeight || sysInfo.screenHeight || 0
     this.webviewSrc =
       '/hybrid/html/flv-player.html?url=' + encodeURIComponent(FLV_URL)
+  },
+  onUnload() {
+    this.clearAutoHideTimer()
+    this.stopSpinner()
   },
   methods: {
     goBack() {
@@ -77,17 +130,84 @@ export default {
         )
       }
     },
+    startSpinner() {
+      this.stopSpinner()
+      this.spinnerTimer = setInterval(() => {
+        this.spinnerAngle = (this.spinnerAngle + 30) % 360
+      }, 80)
+    },
+    stopSpinner() {
+      if (this.spinnerTimer) {
+        clearInterval(this.spinnerTimer)
+        this.spinnerTimer = null
+      }
+    },
     togglePlay() {
       if (this.isPlaying) {
         this.evalInWebview('pause')
         this.isPlaying = false
+        this.isLoading = false
+        this.stopSpinner()
+        this.showControls()
       } else {
         this.evalInWebview('play')
-        this.isPlaying = true
+        this.isLoading = true
+        this.startSpinner()
       }
     },
-    enterFullscreen() {
-      this.evalInWebview('fullscreen')
+    // 全屏是外层 nvue 布局的事：切换 webviewStyle 让 web-view 铺满整个窗口，
+    // 不依赖网页内部的 Fullscreen API（那个 API 无法突破 web-view 组件自身的边界）
+    toggleFullscreen() {
+      this.isFullscreen = !this.isFullscreen
+      this.onFullscreenStateChanged()
+    },
+    // 旋转屏幕按钮：切横屏前先进入全屏（跟方案1保持一致的交互逻辑：横屏体验一般伴随全屏）
+    toggleRotate() {
+      this.isLandscape = !this.isLandscape
+      if (this.isLandscape && !this.isFullscreen) {
+        this.isFullscreen = true
+        this.onFullscreenStateChanged()
+      } else {
+        this.showControls()
+      }
+    },
+    // 进入全屏后立即隐藏导航栏/控制栏，追求沉浸式体验，点击屏幕才重新浮现；
+    // 退出全屏后恢复显示，跟方案1（flv-player-h5.html）保持一致的交互逻辑
+    onFullscreenStateChanged() {
+      if (this.isFullscreen) {
+        this.hideControls()
+      } else {
+        this.showControls()
+      }
+    },
+    showControls() {
+      this.controlsVisible = true
+      this.scheduleAutoHide()
+    },
+    hideControls() {
+      this.controlsVisible = false
+      this.clearAutoHideTimer()
+    },
+    toggleControlsVisible() {
+      if (this.controlsVisible) {
+        this.hideControls()
+      } else {
+        this.showControls()
+      }
+    },
+    clearAutoHideTimer() {
+      if (this.hideControlsTimer) {
+        clearTimeout(this.hideControlsTimer)
+        this.hideControlsTimer = null
+      }
+    },
+    scheduleAutoHide() {
+      this.clearAutoHideTimer()
+      // 只有播放中才自动隐藏，暂停时保持常驻显示
+      if (!this.isPlaying) return
+      this.hideControlsTimer = setTimeout(() => {
+        this.hideControls()
+      }, 3000)
     },
     // nvue 下 @onPostMessage 直接收到 data 对象，实际消息内容在 data.detail 里
     onWebviewMessage(data) {
@@ -97,8 +217,17 @@ export default {
       if (!msg) return
       if (msg.type === 'play_success') {
         this.isPlaying = true
-      } else if (msg.type === 'paused' || msg.type === 'play_rejected') {
+        this.isLoading = false
+        this.stopSpinner()
+        this.scheduleAutoHide()
+      } else if (msg.type === 'paused' || msg.type === 'play_rejected' || msg.type === 'error') {
         this.isPlaying = false
+        this.isLoading = false
+        this.stopSpinner()
+        this.showControls()
+      } else if (msg.type === 'toggle_controls') {
+        // 用户点击了视频区域（网页内部的 tapLayer），切换导航栏/控制栏显示状态
+        this.toggleControlsVisible()
       }
     },
   },
@@ -108,14 +237,95 @@ export default {
 <style>
 .page {
   flex: 1;
-  flex-direction: column;
-  background-color: #000000;
+  background-color: #0b0b0d;
 }
 
+.webview {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+.fallback {
+  position: absolute;
+  left: 0;
+  right: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-color: #0b0b0d;
+}
+
+.fallback-text {
+  color: #8f8f94;
+  text-align: center;
+}
+
+/* 封面态：跟方案1一样的深色配色，只是用 nvue 支持的纯色背景（nvue 不支持 radial-gradient） */
+.cover {
+  position: absolute;
+  left: 0;
+  right: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: #14141a;
+}
+
+.cover-play-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 32px;
+  background-color: rgba(255, 255, 255, 0.14);
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.cover-play-icon {
+  color: #ffffff;
+  font-size: 22px;
+}
+
+.cover-text {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+}
+
+.loading {
+  position: absolute;
+  left: 0;
+  right: 0;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(11, 11, 13, 0.65);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  border-width: 3px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.25);
+  border-top-color: #ffffff;
+  margin-bottom: 12px;
+}
+
+.loading-text {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+}
+
+/* 导航栏和控制栏用 position: absolute 悬浮在 web-view 上方，
+   在 nvue 模板里它们声明在 web-view 之后，层级天然更高，能稳定盖住视频区域 */
 .nav-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
   flex-direction: row;
   align-items: center;
-  background-color: #1a1a1a;
+  background-color: rgba(0, 0, 0, 0.55);
 }
 
 .nav-back {
@@ -133,48 +343,59 @@ export default {
 
 .nav-title {
   color: #ffffff;
-  font-size: 16px;
-}
-
-.webview {
-  flex: 1;
-}
-
-.fallback {
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  background-color: #000000;
-}
-
-.fallback-text {
-  color: #8f8f94;
-  text-align: center;
+  font-size: 15px;
 }
 
 .control-bar {
-  height: 56px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 44px;
   flex-direction: row;
   align-items: center;
-  justify-content: center;
-  background-color: #1a1a1a;
+  padding-left: 8px;
+  padding-right: 8px;
+  background-color: rgba(0, 0, 0, 0.6);
 }
 
-.play-btn,
-.fullscreen-btn {
-  padding: 8px 24px;
-  border-radius: 999px;
-  background-color: #333333;
+.ctrl-spacer {
+  flex: 1;
+}
+
+.ctrl-icon-btn {
+  width: 40px;
+  height: 40px;
   align-items: center;
   justify-content: center;
-  margin-left: 12px;
-  margin-right: 12px;
 }
 
-.play-btn-text,
-.fullscreen-btn-text {
+.ctrl-icon {
   color: #ffffff;
-  font-size: 14px;
+  font-size: 18px;
+}
+
+.live-badge {
+  flex-direction: row;
+  align-items: center;
+  margin-left: 4px;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: #ff4d4f;
+  margin-right: 4px;
+}
+
+.live-badge-text {
+  color: #ffffff;
+  font-size: 12px;
+}
+
+/* 控制层自动隐藏：透明度过渡，隐藏时不再接收点击 */
+.controls-hidden {
+  opacity: 0;
 }
 </style>
