@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>守望 - 监控直播原型 v0</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #161818;
+      --muted: #737977;
+      --line: #e5e8e6;
+      --surface: #f5f7f5;
+      --paper: #ffffff;
+      --stage: #111413;
+      --live: #e54936;
+      --online: #28a06a;
+      --shadow: 0 22px 80px rgba(10, 18, 15, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(rgba(22, 24, 24, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22, 24, 24, 0.035) 1px, transparent 1px),
+        #ecefed;
+      background-size: 32px 32px;
+      color: var(--ink);
+      font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button { font: inherit; }
+
+    .prototype-shell {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+
+    .phone {
+      position: relative;
+      width: min(390px, 100%);
+      height: min(844px, calc(100vh - 48px));
+      min-height: 700px;
+      overflow: hidden;
+      background: var(--surface);
+      border: 10px solid #242725;
+      border-radius: 42px;
+      box-shadow: var(--shadow), inset 0 0 0 1px rgba(255,255,255,.1);
+    }
+
+    .status-bar {
+      height: 38px;
+      padding: 10px 20px 0;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      background: var(--stage);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      z-index: 20;
+      position: relative;
+    }
+
+    .status-icons { display: flex; align-items: center; gap: 5px; }
+    .signal { font-size: 10px; }
+    .battery {
+      width: 17px; height: 8px; border: 1px solid rgba(255,255,255,.8);
+      border-radius: 2px; position: relative;
+    }
+    .battery::before { content: ""; position: absolute; inset: 1px; background: white; border-radius: 1px; }
+    .battery::after { content: ""; position: absolute; right: -3px; top: 2px; width: 2px; height: 4px; background: rgba(255,255,255,.8); }
+
+    .screen {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(18px);
+      transition: opacity 180ms ease, transform 220ms cubic-bezier(.2,.8,.2,1);
+    }
+
+    .screen.active { opacity: 1; pointer-events: auto; transform: translateX(0); }
+
+    .live-screen { background: var(--surface); }
+
+    .live-header {
+      height: 64px;
+      padding: 8px 10px 10px;
+      background: var(--stage);
+      color: white;
+      display: grid;
+      grid-template-columns: 48px 1fr 48px;
+      align-items: center;
+      position: relative;
+      z-index: 3;
+    }
+
+    .icon-button {
+      width: 44px;
+      height: 44px;
+      border: 0;
+      border-radius: 50%;
+      display: inline-grid;
+      place-items: center;
+      color: inherit;
+      background: transparent;
+      cursor: pointer;
+      transition: background 150ms ease, transform 120ms ease;
+    }
+
+    .icon-button:hover { background: rgba(255,255,255,.1); }
+    .icon-button:active { transform: scale(.93); }
+    .icon-button:focus-visible { outline: 2px solid white; outline-offset: -3px; }
+    .icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    .live-title { min-width: 0; text-align: center; }
+    .live-title strong { display: block; font-size: 16px; line-height: 21px; font-weight: 700; text-wrap: pretty; }
+    .live-title span { display: block; font-size: 11px; line-height: 16px; color: rgba(255,255,255,.58); }
+
+    .viewer {
+      position: relative;
+      height: 284px;
+      flex: 0 0 284px;
+      background: #131615;
+      overflow: hidden;
+    }
+
+    .viewer img {
+      width: 100%; height: 100%; object-fit: cover;
+      filter: saturate(.72) contrast(1.06) brightness(.73);
+      transform: scale(1.03);
+    }
+
+    .viewer::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to bottom, rgba(9,12,11,.22), transparent 30%, transparent 64%, rgba(9,12,11,.55));
+      pointer-events: none;
+    }
+
+    .video-top, .video-bottom {
+      position: absolute; left: 14px; right: 14px; z-index: 2;
+      display: flex; align-items: center; justify-content: space-between;
+      color: white;
+    }
+    .video-top { top: 14px; }
+    .video-bottom { bottom: 13px; }
+
+    .live-pill, .quality-pill {
+      min-height: 26px; padding: 0 8px; border-radius: 5px;
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(12,15,14,.6); border: 1px solid rgba(255,255,255,.13);
+      backdrop-filter: blur(8px); color: white; font-size: 11px; font-weight: 700;
+    }
+    .live-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #ff5b47; box-shadow: 0 0 0 3px rgba(229,73,54,.2); }
+    .quality-pill { cursor: pointer; border: 1px solid rgba(255,255,255,.13); }
+
+    .timestamp { font: 600 11px/1.4 "SFMono-Regular", Consolas, monospace; text-shadow: 0 1px 5px #000; }
+    .video-actions { display: flex; gap: 2px; }
+    .video-actions .icon-button { width: 38px; height: 38px; background: rgba(12,15,14,.54); backdrop-filter: blur(8px); }
+    .video-actions .icon-button + .icon-button { margin-left: 4px; }
+
+    .content {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 14px 14px 26px;
+      scrollbar-width: none;
+    }
+    .content::-webkit-scrollbar { display: none; }
+
+    .status-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+    .device-meta { min-width: 0; }
+    .device-meta strong { display: block; font-size: 15px; line-height: 22px; }
+    .device-meta span { display: block; color: var(--muted); font-size: 11px; line-height: 17px; }
+    .online { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #247b55; font-weight: 700; margin-top: 4px; }
+    .online::before { content: ""; width: 7px; height: 7px; background: var(--online); border-radius: 50%; }
+
+    .timeline {
+      height: 45px;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin-bottom: 16px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .track { height: 2px; background: #dfe3e0; position: relative; }
+    .track::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 72%; background: var(--ink); }
+    .track::after { content: ""; position: absolute; left: 72%; top: 50%; width: 8px; height: 8px; border: 2px solid white; background: var(--ink); border-radius: 50%; transform: translate(-50%,-50%); box-shadow: 0 0 0 1px var(--ink); }
+
+    .section-label { margin: 0 0 9px; font-size: 11px; line-height: 16px; color: var(--muted); font-weight: 700; }
+
+    .quick-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 17px; }
+    .action {
+      min-width: 0; height: 72px; border: 1px solid var(--line); border-radius: 6px;
+      background: var(--paper); color: var(--ink); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+      font-size: 11px; font-weight: 600; transition: border 140ms ease, background 140ms ease, transform 120ms ease;
+    }
+    .action:hover { border-color: #bec5c1; background: #fafbfa; }
+    .action:active { transform: translateY(1px); }
+    .action:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+    .ptz-card {
+      min-height: 138px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--paper);
+      display: grid;
+      grid-template-columns: 142px 1fr;
+      align-items: center;
+      padding: 12px;
+      gap: 16px;
+    }
+
+    .dpad {
+      width: 122px; height: 108px; justify-self: center;
+      display: grid; grid-template: repeat(3, 36px) / repeat(3, 36px); gap: 0; place-content: center;
+    }
+    .dpad button { border: 0; background: #f0f2f0; color: #3f4542; cursor: pointer; display: grid; place-items: center; }
+    .dpad button:active { background: #dde3df; }
+    .dpad .up { grid-column: 2; border-radius: 5px 5px 0 0; }
+    .dpad .left { grid-row: 2; grid-column: 1; border-radius: 5px 0 0 5px; }
+    .dpad .center { grid-row: 2; grid-column: 2; border-radius: 50%; background: var(--ink); color: white; transform: scale(.72); }
+    .dpad .right { grid-row: 2; grid-column: 3; border-radius: 0 5px 5px 0; }
+    .dpad .down { grid-row: 3; grid-column: 2; border-radius: 0 0 5px 5px; }
+
+    .zoom-control { min-width: 0; }
+    .zoom-control strong { display: block; margin-bottom: 5px; font-size: 13px; }
+    .zoom-control p { margin: 0 0 14px; color: var(--muted); font-size: 10px; line-height: 16px; text-wrap: pretty; }
+    .zoom-stepper { display: grid; grid-template-columns: 38px 1fr 38px; height: 38px; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+    .zoom-stepper button { border: 0; background: #f6f7f6; cursor: pointer; font-size: 18px; }
+    .zoom-stepper span { display: grid; place-items: center; border-inline: 1px solid var(--line); font-size: 11px; font-weight: 700; }
+
+    .home-indicator { position: absolute; bottom: 7px; left: 50%; z-index: 30; width: 126px; height: 5px; border-radius: 4px; background: rgba(17,20,19,.9); transform: translateX(-50%); }
+
+    .device-screen { background: var(--surface); }
+    .device-screen .status-bar { background: var(--surface); color: var(--ink); }
+    .device-screen .battery { border-color: var(--ink); }
+    .device-screen .battery::before, .device-screen .battery::after { background: var(--ink); }
+    .device-list-header { padding: 14px 20px 10px; display: flex; align-items: flex-end; justify-content: space-between; }
+    .device-list-header h1 { margin: 0; font-size: 28px; line-height: 36px; font-weight: 750; }
+    .device-list-header button { color: var(--ink); }
+    .device-list { padding: 10px 14px 28px; overflow: auto; }
+    .device-card { width: 100%; border: 1px solid var(--line); background: var(--paper); border-radius: 7px; overflow: hidden; padding: 0; text-align: left; cursor: pointer; color: inherit; }
+    .device-card img { width: 100%; height: 196px; object-fit: cover; filter: saturate(.76) brightness(.82); display: block; }
+    .device-card-copy { padding: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .device-card-copy strong { display: block; font-size: 15px; }
+    .device-card-copy span { display: block; margin-top: 4px; font-size: 11px; color: var(--muted); }
+    .chevron { color: #848a87; font-size: 22px; }
+
+    .toast {
+      position: absolute; left: 50%; bottom: 26px; z-index: 50;
+      transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+      min-width: 154px; max-width: calc(100% - 40px); padding: 10px 14px; border-radius: 6px;
+      background: rgba(20,23,22,.92); color: white; text-align: center; font-size: 12px;
+      transition: opacity 160ms ease, transform 180ms ease;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 520px) {
+      .prototype-shell { padding: 0; display: block; }
+      .phone { width: 100%; height: 100dvh; min-height: 680px; border: 0; border-radius: 0; box-shadow: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-shell">
+    <div class="phone" aria-label="监控直播页面交互原型">
+      <section class="screen live-screen active" id="liveScreen" aria-label="客厅摄像头实时画面">
+        <div class="status-bar">
+          <span>9:41</span>
+          <span class="status-icons"><span class="signal">▮▮▮▮</span><span>Wi-Fi</span><span class="battery"></span></span>
+        </div>
+
+        <header class="live-header">
+          <button class="icon-button" id="backButton" aria-label="返回设备列表" title="返回">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div class="live-title">
+            <strong>客厅摄像头</strong>
+            <span>滨江公寓 · 01号设备</span>
+          </div>
+          <button class="icon-button js-toast" data-message="更多设备设置将在完整版本中展开" aria-label="更多设置" title="更多设置">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+          </button>
+        </header>
+
+        <div class="viewer">
+          <img src="assets/monitor-office.jpg" alt="客厅摄像头实时画面演示">
+          <div class="video-top">
+            <span class="live-pill">实时</span>
+            <button class="quality-pill js-toast" data-message="当前画质：高清 1080P">高清 1080P</button>
+          </div>
+          <div class="video-bottom">
+            <span class="timestamp" id="timestamp">2026-08-14&nbsp;&nbsp;19:42:18</span>
+            <div class="video-actions">
+              <button class="icon-button js-toast" data-message="声音已静音" aria-label="静音" title="静音">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6"/></svg>
+              </button>
+              <button class="icon-button js-toast" data-message="全屏模式将在完整版本中展开" aria-label="全屏" title="全屏">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="content">
+          <div class="status-row">
+            <div class="device-meta"><strong>客厅 · 主视角</strong><span>连接稳定 · 延迟 0.8 秒</span></div>
+            <span class="online">设备在线</span>
+          </div>
+
+          <div class="timeline" aria-label="实时录像时间轴">
+            <span>19:30</span><div class="track"></div><span>现在</span>
+          </div>
+
+          <p class="section-label">快捷操作</p>
+          <div class="quick-actions">
+            <button class="action js-toast" data-message="截图已保存到相册">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4 16 7h4v12H4V7h4l1.5-3z"/><circle cx="12" cy="13" r="3"/></svg><span>截图</span>
+            </button>
+            <button class="action js-toast" data-message="本地录像已开始">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg><span>录像</span>
+            </button>
+            <button class="action js-toast" data-message="按住说话将在完整版本中启用">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg><span>对讲</span>
+            </button>
+            <button class="action js-toast" data-message="已打开录像回放入口">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>回放</span>
+            </button>
+          </div>
+
+          <p class="section-label">云台控制</p>
+          <div class="ptz-card">
+            <div class="dpad" aria-label="摄像头方向控制">
+              <button class="up js-toast" data-message="摄像头向上移动" aria-label="向上">↑</button>
+              <button class="left js-toast" data-message="摄像头向左移动" aria-label="向左">←</button>
+              <button class="center js-toast" data-message="云台已回到中心" aria-label="回到中心">●</button>
+              <button class="right js-toast" data-message="摄像头向右移动" aria-label="向右">→</button>
+              <button class="down js-toast" data-message="摄像头向下移动" aria-label="向下">↓</button>
+            </div>
+            <div class="zoom-control">
+              <strong>画面缩放</strong>
+              <p>也可在画面上双指缩放</p>
+              <div class="zoom-stepper">
+                <button class="js-toast" data-message="画面已缩小" aria-label="缩小">−</button><span>1.0×</span><button class="js-toast" data-message="画面已放大" aria-label="放大">＋</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen device-screen" id="deviceScreen" aria-label="设备列表">
+        <div class="status-bar">
+          <span>9:41</span>
+          <span class="status-icons"><span class="signal">▮▮▮▮</span><span>Wi-Fi</span><span class="battery"></span></span>
+        </div>
+        <header class="device-list-header">
+          <div><div class="section-label">滨江公寓</div><h1>我的设备</h1></div>
+          <button class="icon-button js-toast" data-message="添加设备入口" aria-label="添加设备" title="添加设备">＋</button>
+        </header>
+        <div class="device-list">
+          <button class="device-card" id="openLiveButton">
+            <img src="assets/monitor-office.jpg" alt="客厅摄像头预览">
+            <span class="device-card-copy">
+              <span><strong>客厅摄像头</strong><span>在线 · 刚刚更新</span></span>
+              <span class="chevron">›</span>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      <div class="home-indicator"></div>
+    </div>
+  </main>
+
+  <script>
+    const liveScreen = document.getElementById('liveScreen');
+    const deviceScreen = document.getElementById('deviceScreen');
+    const toast = document.getElementById('toast');
+    let toastTimer;
+
+    function showScreen(target) {
+      liveScreen.classList.toggle('active', target === 'live');
+      deviceScreen.classList.toggle('active', target === 'devices');
+    }
+
+    function showToast(message) {
+      window.clearTimeout(toastTimer);
+      toast.textContent = message;
+      toast.classList.add('show');
+      toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1700);
+    }
+
+    document.getElementById('backButton').addEventListener('click', () => showScreen('devices'));
+    document.getElementById('openLiveButton').addEventListener('click', () => showScreen('live'));
+    document.querySelectorAll('.js-toast').forEach((button) => {
+      button.addEventListener('click', () => showToast(button.dataset.message));
+    });
+
+    window.setInterval(() => {
+      const now = new Date();
+      const date = now.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replaceAll('/', '-');
+      const time = now.toLocaleTimeString('zh-CN', { hour12: false });
+      document.getElementById('timestamp').textContent = `${date}  ${time}`;
+    }, 1000);
+  </script>
+</body>
+</html>
