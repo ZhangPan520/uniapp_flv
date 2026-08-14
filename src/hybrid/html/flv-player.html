@@ -159,8 +159,8 @@
     .fullscreen-top,
     .fullscreen-bottom {
       position: absolute;
-      left: 16px;
-      right: 16px;
+      left: max(16px, env(safe-area-inset-left));
+      right: max(16px, env(safe-area-inset-right));
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -171,6 +171,11 @@
     }
     .fullscreen-top { top: max(16px, env(safe-area-inset-top)); }
     .fullscreen-bottom { bottom: max(16px, env(safe-area-inset-bottom)); }
+    .fullscreen-meta {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
     .fullscreen-pill {
       height: 28px;
       padding: 0 9px;
@@ -219,6 +224,7 @@
       stroke-linejoin: round;
     }
     .fullscreen-button .fill-icon { fill: currentColor; stroke: none; }
+    .fullscreen-back svg { width: 22px; height: 22px; }
     .fullscreen-controls-hidden .fullscreen-top {
       opacity: 0;
       transform: translateY(-6px);
@@ -261,18 +267,20 @@
 
   <div id="fullscreenControls" aria-hidden="true">
     <div class="fullscreen-top">
-      <span class="fullscreen-pill"><span class="fullscreen-live-dot"></span>实时</span>
+      <button id="fullscreenBackBtn" class="fullscreen-button fullscreen-back" aria-label="返回">
+        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
       <span class="fullscreen-pill">高清 1080P</span>
     </div>
     <div class="fullscreen-bottom">
-      <span id="fullscreenTimestamp">--</span>
+      <div class="fullscreen-meta">
+        <span id="fullscreenTimestamp">--</span>
+        <span class="fullscreen-pill"><span class="fullscreen-live-dot"></span>实时</span>
+      </div>
       <div class="fullscreen-actions">
         <button id="fullscreenPlayBtn" class="fullscreen-button" aria-label="播放或暂停">
           <svg id="fullscreenPlayIcon" viewBox="0 0 24 24"><path class="fill-icon" d="M8 5v14l11-7z"/></svg>
           <svg id="fullscreenPauseIcon" viewBox="0 0 24 24" style="display:none"><path d="M7 5v14M17 5v14"/></svg>
-        </button>
-        <button id="fullscreenRotateBtn" class="fullscreen-button" aria-label="旋转屏幕">
-          <svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 9a7 7 0 0 1 11.3-2.5L20 9M4 15l2.6 2.5A7 7 0 0 0 17.9 15"/></svg>
         </button>
         <button id="fullscreenExitBtn" class="fullscreen-button" aria-label="退出全屏">
           <svg viewBox="0 0 24 24"><path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/></svg>
@@ -557,9 +565,9 @@
         e.stopPropagation();
         isPlaying ? pausePlay() : startPlay();
       });
-      document.getElementById('fullscreenRotateBtn').addEventListener('click', function (e) {
+      document.getElementById('fullscreenBackBtn').addEventListener('click', function (e) {
         e.stopPropagation();
-        notifyApp('request_rotate');
+        notifyApp('request_fullscreen_exit');
       });
       document.getElementById('fullscreenExitBtn').addEventListener('click', function (e) {
         e.stopPropagation();

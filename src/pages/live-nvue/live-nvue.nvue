@@ -22,11 +22,14 @@
         <text class="timestamp">{{ timestamp }}</text>
         <view class="video-actions">
           <view class="video-button" @click="togglePlay"><text class="video-icon">{{ isPlaying ? 'Ⅱ' : '▶' }}</text></view>
-          <view class="video-button" @click="toggleRotate"><text class="video-icon">↻</text></view>
           <view class="video-button" @click="toggleFullscreen"><text class="fullscreen-icon">{{ isFullscreen ? '⌟⌜' : '⌜⌟' }}</text></view>
         </view>
       </view>
     </view>
+
+    <!-- Android WebView 内的事件桥在部分基座中不会即时执行。全屏时由 nvue
+         原生热区覆盖同位置按钮，视觉仍由播放器绘制，页面自身退出全屏并恢复竖屏。 -->
+    <view v-if="isFullscreen" class="fullscreen-back-hitbox" @click.stop="exitFullscreen(true)"></view>
 
     <scroller v-if="!isFullscreen" class="content" :style="contentStyle">
       <view class="status-row">
@@ -74,17 +77,24 @@
 
 <script>
 const FLV_URL = 'https://srs.unsj.edu.ar/live/xama/xama.flv'
+const PLAYER_UI_VERSION = '20260815-2'
 const HEADER_CONTENT_HEIGHT = 64
 const VIEWER_RATIO = 284 / 390
+const LANDSCAPE_GAMMA_THRESHOLD = 55
+const PORTRAIT_GAMMA_THRESHOLD = 30
+const PORTRAIT_BETA_THRESHOLD = 45
 
 export default {
   data() {
     return {
       webviewSrc: '', statusBarHeight: 0, windowHeight: 0, windowWidth: 390,
-      isPlaying: false, isLoading: false, isFullscreen: false, isLandscape: false,
+      safeAreaTop: 0, safeAreaLeft: 0,
+      isPlaying: false, isLoading: false, isFullscreen: false,
       controlsVisible: true, hideControlsTimer: null,
       webviewStyles: { bounce: 'none', scrollIndicator: 'none', scalable: false },
       timestamp: '', clockTimer: null, toastVisible: false, toastText: '', toastTimer: null, zoom: 1,
+      orientationWatchId: null, physicalOrientation: 'portrait',
+      suppressAutoFullscreenUntilPortrait: false, isLeaving: false,
     }
   },
   computed: {
@@ -109,11 +119,17 @@ export default {
   },
   onLoad() {
     this.updateWindowMetrics()
-    this.webviewSrc = '/hybrid/html/flv-player.html?url=' + encodeURIComponent(FLV_URL)
+    // #ifdef APP-PLUS
+    plus.screen.lockOrientation('portrait-primary')
+    plus.navigator.setFullscreen(false)
+    this.startOrientationWatcher()
+    // #endif
+    this.webviewSrc = '/hybrid/html/flv-player.html?url=' + encodeURIComponent(FLV_URL) + '&uiVersion=' + PLAYER_UI_VERSION
     this.updateTimestamp()
     this.clockTimer = setInterval(this.updateTimestamp, 1000)
   },
   onUnload() {
+    this.stopOrientationWatcher()
     this.clearAutoHideTimer()
     if (this.clockTimer) clearInterval(this.clockTimer)
     if (this.toastTimer) clearTimeout(this.toastTimer)
@@ -125,14 +141,72 @@ export default {
   onResize() {
     this.updateWindowMetrics()
   },
+  onBackPress() {
+    if (this.isFullscreen) {
+      this.exitFullscreen(true)
+      return true
+    }
+    this.restorePortraitMode()
+    return false
+  },
   methods: {
     updateWindowMetrics() {
       const info = uni.getSystemInfoSync()
       this.statusBarHeight = info.statusBarHeight || 0
       this.windowHeight = info.windowHeight || info.screenHeight || 0
       this.windowWidth = info.windowWidth || info.screenWidth || 390
+      const insets = info.safeAreaInsets || {}
+      this.safeAreaTop = Number(insets.top) || 0
+      this.safeAreaLeft = Number(insets.left) || 0
     },
-    goBack() { uni.navigateBack({ delta: 1 }) },
+    restorePortraitMode() {
+      // #ifdef APP-PLUS
+      plus.screen.lockOrientation('portrait-primary')
+      plus.navigator.setFullscreen(false)
+      // #endif
+    },
+    startOrientationWatcher() {
+      // #ifdef APP-PLUS
+      if (this.orientationWatchId !== null || !plus.orientation) return
+      this.orientationWatchId = plus.orientation.watchOrientation(
+        rotation => this.handlePhysicalOrientation(rotation),
+        error => console.warn('[live-nvue orientation]', error),
+        { frequency: 250 }
+      )
+      // #endif
+    },
+    stopOrientationWatcher() {
+      // #ifdef APP-PLUS
+      if (this.orientationWatchId !== null && plus.orientation) {
+        plus.orientation.clearWatch(this.orientationWatchId)
+        this.orientationWatchId = null
+      }
+      // #endif
+    },
+    handlePhysicalOrientation(rotation) {
+      if (!rotation || this.isLeaving) return
+      const gamma = Math.abs(Number(rotation.gamma))
+      const beta = Math.abs(Number(rotation.beta))
+      if (!Number.isFinite(gamma) || !Number.isFinite(beta)) return
+
+      if (gamma >= LANDSCAPE_GAMMA_THRESHOLD && beta < PORTRAIT_BETA_THRESHOLD) {
+        if (this.physicalOrientation !== 'landscape') this.physicalOrientation = 'landscape'
+        if (!this.isFullscreen && !this.suppressAutoFullscreenUntilPortrait) this.enterFullscreen()
+      } else if (gamma <= PORTRAIT_GAMMA_THRESHOLD && beta >= PORTRAIT_BETA_THRESHOLD) {
+        this.physicalOrientation = 'portrait'
+        this.suppressAutoFullscreenUntilPortrait = false
+      }
+    },
+    goBack() { this.restorePortraitAndBack() },
+    restorePortraitAndBack() {
+      if (this.isLeaving) return
+      this.isLeaving = true
+      this.stopOrientationWatcher()
+      this.isFullscreen = false
+      this.evalInWebview('fullscreen_exit')
+      this.restorePortraitMode()
+      setTimeout(() => uni.navigateBack({ delta: 1 }), 80)
+    },
     evalInWebview(action) {
       if (this.$refs.liveWebview) this.$refs.liveWebview.evalJS("window.dispatchEvent(new CustomEvent('uni-app-command', { detail: { action: '" + action + "' } }))")
     },
@@ -148,28 +222,28 @@ export default {
       this.showControls()
     },
     toggleFullscreen() {
-      const nextFullscreen = !this.isFullscreen
-      this.evalInWebview(nextFullscreen ? 'fullscreen_enter' : 'fullscreen_exit')
-      this.isFullscreen = nextFullscreen
+      this.isFullscreen ? this.exitFullscreen(true) : this.enterFullscreen()
+    },
+    enterFullscreen() {
+      if (this.isFullscreen || this.isLeaving) return
+      this.isFullscreen = true
+      this.evalInWebview('fullscreen_enter')
       // #ifdef APP-PLUS
-      plus.navigator.setFullscreen(this.isFullscreen)
+      plus.screen.unlockOrientation()
+      plus.navigator.setFullscreen(true)
       // #endif
-      this.isFullscreen ? this.hideControls() : this.showControls()
+      this.hideControls()
       this.$nextTick(this.updateWindowMetrics)
     },
-    toggleRotate() {
-      this.isLandscape = !this.isLandscape
-      if (!this.isFullscreen) {
-        this.isFullscreen = true
-        this.evalInWebview('fullscreen_enter')
-        // #ifdef APP-PLUS
-        plus.navigator.setFullscreen(true)
-        // #endif
-      }
-      // #ifdef APP-PLUS
-      plus.screen.lockOrientation(this.isLandscape ? 'landscape-primary' : 'portrait-primary')
-      // #endif
-      this.isFullscreen ? this.hideControls() : this.showControls()
+    exitFullscreen(suppressAutoEnter) {
+      this.isFullscreen = false
+      // 用户主动退出后必须等设备真正回到竖屏，才允许下一次横屏自动进入。
+      // 部分 Android 设备在 UI 已横屏时仍会短暂上报旧的传感器方向，不能依赖
+      // physicalOrientation === 'landscape'，否则退出后会被监听器立即重新拉回全屏。
+      this.suppressAutoFullscreenUntilPortrait = Boolean(suppressAutoEnter)
+      this.evalInWebview('fullscreen_exit')
+      this.restorePortraitMode()
+      this.showControls()
       this.$nextTick(this.updateWindowMetrics)
     },
     clearAutoHideTimer() { if (this.hideControlsTimer) { clearTimeout(this.hideControlsTimer); this.hideControlsTimer = null } },
@@ -179,31 +253,23 @@ export default {
     changeZoom(delta) { this.zoom = Math.max(0.5, Math.min(3, Number((this.zoom + delta).toFixed(1)))); this.showToast('画面缩放 ' + this.zoom.toFixed(1) + '×') },
     updateTimestamp() { const d = new Date(); const p = n => String(n).padStart(2, '0'); this.timestamp = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '  ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) },
     onWebviewMessage(event) {
-      let msg = event && event.detail && event.detail.data !== undefined
-        ? event.detail.data
-        : event
-      for (let depth = 0; depth < 5 && msg && !msg.type; depth += 1) {
+      const msg = this.extractMessage(event)
+      if (!msg) return
+      if (msg.type === 'play_success' || msg.type === 'first_frame') { this.isPlaying = true; this.isLoading = false; this.showControls() }
+      else if (msg.type === 'paused' || msg.type === 'play_rejected' || msg.type === 'error') { this.isPlaying = false; this.isLoading = false; this.showControls() }
+      else if (msg.type === 'toggle_controls') { this.controlsVisible ? this.hideControls() : this.showControls() }
+      else if (msg.type === 'request_back') this.restorePortraitAndBack()
+      else if (msg.type === 'request_fullscreen_exit') this.exitFullscreen(true)
+    },
+    extractMessage(event) {
+      let msg = event && event.detail && event.detail.data !== undefined ? event.detail.data : event
+      for (let depth = 0; depth < 6 && msg && !msg.type; depth += 1) {
         if (Array.isArray(msg)) msg = msg[0]
         else if (msg.detail !== undefined) msg = msg.detail
         else if (msg.data !== undefined) msg = msg.data
         else break
       }
-      if (!msg) return
-      if (msg.type === 'play_success' || msg.type === 'first_frame') { this.isPlaying = true; this.isLoading = false; this.showControls() }
-      else if (msg.type === 'paused' || msg.type === 'play_rejected' || msg.type === 'error') { this.isPlaying = false; this.isLoading = false; this.showControls() }
-      else if (msg.type === 'toggle_controls') { this.controlsVisible ? this.hideControls() : this.showControls() }
-      else if (msg.type === 'request_rotate') { this.toggleRotate() }
-      else if (msg.type === 'request_fullscreen_exit') {
-        this.isFullscreen = false
-        this.isLandscape = false
-        this.evalInWebview('fullscreen_exit')
-        // #ifdef APP-PLUS
-        plus.screen.lockOrientation('portrait-primary')
-        plus.navigator.setFullscreen(false)
-        // #endif
-        this.showControls()
-        this.$nextTick(this.updateWindowMetrics)
-      }
+      return msg
     },
   },
 }
@@ -215,6 +281,7 @@ export default {
 .header-button { width:48px; height:64px; align-items:center; justify-content:center; }.back-icon { color:#fff; font-size:32px; font-weight:300; }.more-icon { color:#fff; font-size:18px; font-weight:700; }
 .header-title { flex:1; align-items:center; justify-content:center; }.title { color:#fff; font-size:16px; line-height:21px; font-weight:700; }.subtitle { color:rgba(255,255,255,.58); font-size:11px; line-height:16px; }
 .viewer { position:absolute; left:0; right:0; z-index:2; overflow:hidden; background-color:#131615; }.webview,.fallback { position:absolute; left:0; right:0; top:0; bottom:0; }.fallback { align-items:center; justify-content:center; }.fallback-text { color:#fff; font-size:13px; }
+.fullscreen-back-hitbox { position:absolute; left:0; top:0; z-index:40; width:128px; height:80px; background-color:rgba(0,0,0,.01); }
 .cover { position:absolute; left:0; right:0; top:0; bottom:0; z-index:5; align-items:center; justify-content:center; background-color:rgba(17,20,19,.55); }.cover-button { width:62px; height:62px; margin-bottom:12px; align-items:center; justify-content:center; border-width:1px; border-style:solid; border-color:rgba(255,255,255,.22); border-radius:31px; background-color:rgba(12,15,14,.66); }.cover-play { margin-left:3px; color:#fff; font-size:24px; }.cover-text { color:rgba(255,255,255,.78); font-size:12px; }
 .video-top,.video-bottom { position:absolute; left:14px; right:14px; z-index:7; flex-direction:row; align-items:center; justify-content:space-between; }.video-top { top:14px; }.video-bottom { bottom:13px; }.hidden { opacity:0; }
 .live-pill,.quality-pill { height:26px; padding-left:8px; padding-right:8px; flex-direction:row; align-items:center; border-width:1px; border-style:solid; border-color:rgba(255,255,255,.13); border-radius:5px; background-color:rgba(12,15,14,.65); }.live-dot { width:6px; height:6px; margin-right:6px; border-radius:3px; background-color:#ff5b47; }.pill-text { color:#fff; font-size:11px; font-weight:700; }.timestamp { color:#fff; font-size:11px; font-weight:600; }.video-actions { flex-direction:row; }.video-button { width:38px; height:38px; margin-left:4px; align-items:center; justify-content:center; border-radius:19px; background-color:rgba(12,15,14,.62); }.video-icon { color:#fff; font-size:16px; }.fullscreen-icon { color:#fff; font-size:15px; }

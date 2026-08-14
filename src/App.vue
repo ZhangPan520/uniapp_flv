@@ -49,6 +49,10 @@ function applyAndroidSystemUi() {
 export default {
   onLaunch: function () {
     console.log('App Launch')
+    // #ifdef APP-PLUS
+    plus.screen.lockOrientation('portrait-primary')
+    plus.navigator.setFullscreen(false)
+    // #endif
     applyAndroidSystemUi()
   },
   onShow: function () {

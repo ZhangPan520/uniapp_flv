@@ -61,8 +61,18 @@ export default {
   onLoad() {
     const systemInfo = uni.getSystemInfoSync()
     this.statusBarHeight = systemInfo.statusBarHeight || 0
+    this.restorePortraitMode()
+  },
+  onShow() {
+    this.restorePortraitMode()
   },
   methods: {
+    restorePortraitMode() {
+      // #ifdef APP-PLUS
+      plus.screen.lockOrientation('portrait-primary')
+      plus.navigator.setFullscreen(false)
+      // #endif
+    },
     openLivePicker() {
       this.pickerVisible = true
     },

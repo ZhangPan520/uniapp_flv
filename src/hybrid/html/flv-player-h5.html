@@ -28,7 +28,9 @@
     .video-top { top:14px; }.video-bottom { bottom:13px; }
     .pill { min-height:26px; padding:0 8px; display:inline-flex; align-items:center; gap:6px; border:1px solid rgba(255,255,255,.13); border-radius:5px; background:rgba(12,15,14,.6); backdrop-filter:blur(8px); color:#fff; font-size:11px; font-weight:700; }
     .live-dot { width:6px; height:6px; border-radius:50%; background:#ff5b47; box-shadow:0 0 0 3px rgba(229,73,54,.2); }
+    .video-meta { display:flex; align-items:center; gap:9px; }
     #timestamp { font:600 11px/1.4 "SFMono-Regular",Consolas,monospace; text-shadow:0 1px 5px #000; }
+    .fullscreen-only { display:none; }
     .video-actions { display:flex; gap:4px; }
     .video-actions .icon-button { width:38px; height:38px; background:rgba(12,15,14,.54); backdrop-filter:blur(8px); }
     #cover,#loading { position:absolute; inset:0; z-index:4; display:flex; flex-direction:column; align-items:center; justify-content:center; color:#fff; }
@@ -56,6 +58,10 @@
     #toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom)); z-index:30; max-width:calc(100% - 40px); padding:10px 14px; border-radius:6px; background:rgba(20,23,22,.93); color:#fff; font-size:12px; white-space:nowrap; opacity:0; pointer-events:none; transform:translate(-50%,14px); transition:opacity .16s ease,transform .18s ease; }#toast.show { opacity:1; transform:translate(-50%,0); }
     .controls-hidden .video-top { opacity:0; transform:translateY(-6px); pointer-events:none; }.controls-hidden .video-bottom { opacity:0; transform:translateY(6px); pointer-events:none; }
     #app.is-fullscreen #header,#app.is-fullscreen #content { display:none; }#app.is-fullscreen #viewer { flex:1; height:100%; min-height:0; }#app.is-fullscreen #video { object-fit:contain; }#app.is-fullscreen #placeholder { object-fit:contain; }
+    #app.is-fullscreen .normal-live { display:none; }
+    #app.is-fullscreen .fullscreen-only { display:inline-flex; }
+    #app.is-fullscreen #fullscreenBack { display:grid; background:rgba(12,15,14,.54); backdrop-filter:blur(8px); }
+    #app.is-fullscreen .video-top,#app.is-fullscreen .video-bottom { left:max(14px,env(safe-area-inset-left)); right:max(14px,env(safe-area-inset-right)); }
     @media (max-height:680px) { #viewer { min-height:190px; flex-basis:240px; } .action { height:64px; } }
     @media (prefers-reduced-motion:reduce) { *,*::before,*::after { transition-duration:.01ms!important; animation-duration:.01ms!important; } }
   </style>
@@ -73,10 +79,9 @@
       <div id="shade"></div><div id="tapLayer"></div><div id="tip"></div>
       <div id="cover"><button id="coverPlay" aria-label="播放直播"><svg class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button><span id="coverText">点击播放实时画面</span></div>
       <div id="loading"><div id="spinner"></div><span id="loadingText">正在连接直播...</span></div>
-      <div class="video-top"><span class="pill"><span class="live-dot"></span>实时</span><button class="pill js-tip" data-tip="当前画质：高清 1080P">高清 1080P</button></div>
-      <div class="video-bottom"><span id="timestamp">2026-08-14&nbsp;&nbsp;19:42:18</span><div class="video-actions">
+      <div class="video-top"><button class="icon-button fullscreen-only" id="fullscreenBack" aria-label="返回"><svg class="icon" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button><span class="pill normal-live"><span class="live-dot"></span>实时</span><button class="pill js-tip" data-tip="当前画质：高清 1080P">高清 1080P</button></div>
+      <div class="video-bottom"><div class="video-meta"><span id="timestamp">2026-08-14&nbsp;&nbsp;19:42:18</span><span class="pill fullscreen-only"><span class="live-dot"></span>实时</span></div><div class="video-actions">
         <button class="icon-button" id="playBtn" aria-label="播放或暂停"><svg id="playIcon" class="icon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg><svg id="pauseIcon" class="icon" viewBox="0 0 24 24" style="display:none"><path d="M7 5v14M17 5v14"/></svg></button>
-        <button class="icon-button" id="rotateBtn" aria-label="旋转屏幕"><svg class="icon" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6.1 9a7 7 0 0 1 11.3-2.5L20 9M4 15l2.6 2.5A7 7 0 0 0 17.9 15"/></svg></button>
         <button class="icon-button" id="fullscreenBtn" aria-label="全屏"><svg id="fsEnter" class="icon" viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg><svg id="fsExit" class="icon" viewBox="0 0 24 24" style="display:none"><path d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/></svg></button>
       </div></div>
     </section>
@@ -100,7 +105,7 @@
     (function(){
       var app=document.getElementById('app'),video=document.getElementById('video'),placeholder=document.getElementById('placeholder'),cover=document.getElementById('cover'),loading=document.getElementById('loading'),tip=document.getElementById('tip'),toast=document.getElementById('toast');
       var playIcon=document.getElementById('playIcon'),pauseIcon=document.getElementById('pauseIcon'),fsEnter=document.getElementById('fsEnter'),fsExit=document.getElementById('fsExit');
-      var flvUrl='https://srs.unsj.edu.ar/live/xama/xama.flv',player=null,retryTimer=null,retryCount=0,started=false,isPlaying=false,isFullscreen=false,isLandscape=false,controlsVisible=true,hideTimer=null,toastTimer=null;
+      var flvUrl='https://srs.unsj.edu.ar/live/xama/xama.flv',player=null,retryTimer=null,retryCount=0,started=false,isPlaying=false,isFullscreen=false,controlsVisible=true,hideTimer=null,toastTimer=null;
       function notify(type,detail){try{if(window.uni&&window.uni.postMessage)window.uni.postMessage({data:{type:type,detail:detail}})}catch(e){}}
       function showToast(text){clearTimeout(toastTimer);toast.textContent=text;toast.classList.add('show');toastTimer=setTimeout(function(){toast.classList.remove('show')},1700)}
       function showTip(text){tip.textContent=text||'';tip.style.display=text?'block':'none'}
@@ -120,17 +125,23 @@
       function startPlay(){started=true;if(!player)createPlayer();else{showLoading();player.play().then(onPlaySuccess).catch(onPlayError)}}
       function pausePlay(){if(player)player.pause();isPlaying=false;setPlayIcon();showControls();notify('paused')}
       function togglePlay(){isPlaying?pausePlay():startPlay()}
-      function requestFullscreen(){var fn=app.requestFullscreen||app.webkitRequestFullscreen;if(fn)fn.call(app);else notify('fullscreen_unsupported')}
-      function exitFullscreen(){var fn=document.exitFullscreen||document.webkitExitFullscreen;if(fn)fn.call(document)}
+      function requestFullscreen(){var fn=app.requestFullscreen||app.webkitRequestFullscreen;if(!fn){notify('fullscreen_unsupported');return}try{var result=fn.call(app);if(result&&result.catch)result.catch(function(err){notify('fullscreen_error',String(err))})}catch(err){notify('fullscreen_error',String(err))}}
+      function exitFullscreen(){var fn=document.exitFullscreen||document.webkitExitFullscreen;if(!fn)return;try{var result=fn.call(document);if(result&&result.catch)result.catch(function(err){notify('fullscreen_error',String(err))})}catch(err){notify('fullscreen_error',String(err))}}
       function toggleFullscreen(){isFullscreen?exitFullscreen():requestFullscreen()}
-      function onFullscreenChange(){isFullscreen=!!(document.fullscreenElement||document.webkitFullscreenElement);app.classList.toggle('is-fullscreen',isFullscreen);fsEnter.style.display=isFullscreen?'none':'';fsExit.style.display=isFullscreen?'':'none';notify(isFullscreen?'fullscreen_enter':'fullscreen_exit');isFullscreen?hideControls():showControls()}
-      function toggleRotate(){isLandscape=!isLandscape;if(!isFullscreen)requestFullscreen();var orientation=screen.orientation;if(orientation&&orientation.lock)orientation.lock(isLandscape?'landscape':'portrait').catch(function(){});showControls()}
-      document.getElementById('backBtn').addEventListener('click',function(){if(window.uni&&window.uni.webView)window.uni.webView.navigateBack();else notify('back')});
+      function updateOrientationPolicy(){var orientation=screen.orientation;if(!orientation)return;try{if(isFullscreen&&orientation.unlock)orientation.unlock();else if(!isFullscreen&&orientation.lock){var result=orientation.lock('portrait');if(result&&result.catch)result.catch(function(){})}}catch(e){}}
+      function onFullscreenChange(){isFullscreen=!!(document.fullscreenElement||document.webkitFullscreenElement);app.classList.toggle('is-fullscreen',isFullscreen);fsEnter.style.display=isFullscreen?'none':'';fsExit.style.display=isFullscreen?'':'none';updateOrientationPolicy();notify(isFullscreen?'fullscreen_enter':'fullscreen_exit');showControls()}
+      function setExternalFullscreen(enabled){isFullscreen=enabled;app.classList.toggle('is-fullscreen',enabled);fsEnter.style.display=enabled?'none':'';fsExit.style.display=enabled?'':'none';showControls()}
+      function requestAppFullscreen(enabled){if(window.plus||/Html5Plus/i.test(navigator.userAgent)){setExternalFullscreen(enabled);try{if(window.plus){if(enabled){plus.screen.unlockOrientation();plus.navigator.setFullscreen(true)}else{plus.screen.lockOrientation('portrait-primary');plus.navigator.setFullscreen(false)}}}catch(e){}notify(enabled?'request_fullscreen_enter':'request_fullscreen_exit');return}enabled?requestFullscreen():exitFullscreen()}
+      function requestAppBack(){try{if(window.plus){plus.screen.lockOrientation('portrait-primary');plus.navigator.setFullscreen(false)}}catch(e){}if(window.uni&&window.uni.webView)window.uni.webView.navigateBack();else notify('request_back')}
+      document.getElementById('backBtn').addEventListener('click',requestAppBack);
       document.getElementById('playBtn').addEventListener('click',function(e){e.stopPropagation();togglePlay()});document.getElementById('coverPlay').addEventListener('click',startPlay);document.getElementById('tapLayer').addEventListener('click',function(){controlsVisible?hideControls():showControls()});
-      document.getElementById('rotateBtn').addEventListener('click',function(e){e.stopPropagation();toggleRotate()});document.getElementById('fullscreenBtn').addEventListener('click',function(e){e.stopPropagation();toggleFullscreen()});document.addEventListener('fullscreenchange',onFullscreenChange);document.addEventListener('webkitfullscreenchange',onFullscreenChange);
+      document.getElementById('fullscreenBack').addEventListener('click',function(e){e.stopPropagation();requestAppBack()});document.getElementById('fullscreenBtn').addEventListener('click',function(e){e.stopPropagation();requestAppFullscreen(!isFullscreen)});document.addEventListener('fullscreenchange',onFullscreenChange);document.addEventListener('webkitfullscreenchange',onFullscreenChange);
+      window.addEventListener('uni-app-command',function(e){var action=e&&e.detail&&e.detail.action;if(action==='fullscreen_enter')setExternalFullscreen(true);else if(action==='fullscreen_exit')setExternalFullscreen(false)});
       Array.prototype.forEach.call(document.querySelectorAll('.js-tip'),function(el){el.addEventListener('click',function(){showToast(el.getAttribute('data-tip'))})});
       function readQuery(){try{var params=new URLSearchParams(location.search),url=params.get('url'),status=parseFloat(params.get('statusBarHeight')||'0');if(url)flvUrl=decodeURIComponent(url);if(status>0)document.documentElement.style.setProperty('--status',status+'px')}catch(e){}}readQuery();
       function updateTime(){var now=new Date(),pad=function(v){return String(v).padStart(2,'0')};document.getElementById('timestamp').textContent=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+'  '+pad(now.getHours())+':'+pad(now.getMinutes())+':'+pad(now.getSeconds())}updateTime();setInterval(updateTime,1000);
+      notify('ready');
+      document.addEventListener('UniAppJSBridgeReady',function(){notify('ready')});
       document.addEventListener('visibilitychange',function(){if(!started||!player)return;if(document.hidden)player.pause();else player.play().catch(function(){})});
     })();
   </script>
